@@ -18,8 +18,9 @@ git fetch -q origin main
 [[ $(git rev-parse HEAD) == $(git rev-parse origin/main) ]] || { echo "本地 main 和 origin/main 不一致，先同步" >&2; exit 1; }
 if gh release view "$TAG" >/dev/null 2>&1; then echo "$TAG 已经发布过了" >&2; exit 1; fi
 
-# Until the commit below, a failure puts the version back so the tree stays clean.
-trap 'git checkout -- package.json package-lock.json' ERR
+# Until the commit below, any exit (a failure, Ctrl-C, saying no) puts the version back. EXIT, not ERR:
+# ERR doesn't fire when set -u aborts on an unset variable.
+trap 'git checkout -- package.json package-lock.json' EXIT
 npm version "$VERSION" --no-git-tag-version >/dev/null
 
 npm run typecheck
@@ -29,13 +30,14 @@ npm run build:mac
 npm run build:win
 
 FILES=("dist/Hush-$VERSION-arm64.dmg" "dist/Hush-$VERSION-arm64-mac.zip" "dist/Hush-$VERSION-setup.exe")
-for f in "${FILES[@]}"; do [[ -f $f ]] || { echo "缺少 $f" >&2; false; }; done
+for f in "${FILES[@]}"; do [[ -f $f ]] || { echo "缺少 ${f}" >&2; exit 1; }; done
 
 echo
 ls -lh "${FILES[@]}"
-read -r -p "推送到 GitHub 并发布 $TAG？[y/N] " answer
-[[ $answer == y || $answer == Y ]] || { echo "已取消，版本号改回原样；安装包留在 dist/"; false; }
-trap - ERR
+# Braces matter next to Chinese text: bash would read the bytes of ？ as part of the variable's name.
+read -r -p "推送到 GitHub 并发布 ${TAG}？[y/N] " answer
+[[ $answer == y || $answer == Y ]] || { echo "已取消，版本号改回原样；安装包留在 dist/"; exit 1; }
+trap - EXIT
 
 PREV=$(gh release view --json tagName -q .tagName 2>/dev/null || true)
 git fetch -q --tags origin
