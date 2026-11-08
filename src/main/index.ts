@@ -1,5 +1,8 @@
 import { app, BrowserWindow, Menu, nativeTheme, net, protocol, shell } from 'electron'
-import { join } from 'path'
+import { execFile, spawn } from 'child_process'
+import { accessSync, constants, readdirSync } from 'fs'
+import { dirname, join, resolve } from 'path'
+import { promisify } from 'util'
 import { pathToFileURL } from 'url'
 import type Database from 'better-sqlite3'
 import { openDb } from './db'
@@ -9,12 +12,15 @@ import { createFileStore, type FileStore } from './files/store'
 import { registerIpc } from './ipc'
 import { applyOpenAtLogin, createMini, openedAtLogin } from './miniWindow'
 import { createSyncService } from './sync/service'
+import { createUpdater } from './updater'
 
 // HUSH_SYNC_URL points a dev build at a local server (cd server && npm start).
 const SYNC_URL = process.env.HUSH_SYNC_URL ?? 'https://hush.evildentist.uk'
 const SYNC_CHECK_MS = 60_000
+const UPDATE_FIRST_CHECK_MS = 10_000
+const UPDATE_CHECK_MS = 6 * 60 * 60_000
 
-function broadcast(channel: 'sync:status' | 'sync:applied', payload: unknown): void {
+function broadcast(channel: 'sync:status' | 'sync:applied' | 'updater:status', payload: unknown): void {
   for (const win of BrowserWindow.getAllWindows()) win.webContents.send(channel, payload)
 }
 
@@ -41,6 +47,57 @@ function serveFiles(db: Database.Database, files: FileStore): void {
     headers.set('Access-Control-Allow-Origin', '*')
     return new Response(res.body, { status: res.status, headers })
   })
+}
+
+// Hush.app, from .../Hush.app/Contents/MacOS/Hush.
+const appBundle = (): string => resolve(app.getPath('exe'), '../../..')
+
+function cannotInstall(): string | null {
+  // A dev build's app is node_modules' Electron.app.
+  if (!app.isPackaged) return '开发版本不能自动安装'
+  if (process.platform !== 'darwin') return null
+  const bundle = appBundle()
+  // Run from the dmg, or moved by macOS to a random read-only folder because it was never dragged out.
+  if (bundle.startsWith('/Volumes/') || bundle.includes('/AppTranslocation/')) {
+    return '先把 Hush 拖进「应用程序」文件夹，才能自动更新'
+  }
+  try {
+    accessSync(dirname(bundle), constants.W_OK)
+    accessSync(bundle, constants.W_OK)
+  } catch {
+    return 'Hush 所在的文件夹不能写入，没法自动替换'
+  }
+  return null
+}
+
+// ditto, not a zip library: Electron's frameworks are full of symlinks it keeps as they are.
+async function extractApp(zipPath: string, dir: string): Promise<string> {
+  await promisify(execFile)('ditto', ['-x', '-k', zipPath, dir])
+  const name = readdirSync(dir).find((n) => n.endsWith('.app'))
+  if (!name) throw new Error('No .app in the update')
+  return join(dir, name)
+}
+
+// Waits for this process to exit, swaps the app, and puts the old one back if the copy fails.
+const SWAP_SCRIPT = `pid=$1; new=$2; dest=$3; backup="$dest.old-update"
+while kill -0 "$pid" 2>/dev/null; do sleep 0.2; done
+rm -rf "$backup"
+if mv "$dest" "$backup"; then
+  if ditto "$new" "$dest"; then rm -rf "$backup"; else rm -rf "$dest"; mv "$backup" "$dest"; fi
+fi
+open "$dest"`
+
+function installUpdate(downloaded: string): void {
+  const child =
+    process.platform === 'darwin'
+      ? spawn('/bin/sh', ['-c', SWAP_SCRIPT, 'sh', String(process.pid), downloaded, appBundle()], {
+          detached: true,
+          stdio: 'ignore'
+        })
+      : // electron-builder's NSIS installer: silent, closes the running app, opens the new one when done.
+        spawn(downloaded, ['/S', '--updated', '--force-run'], { detached: true, stdio: 'ignore' })
+  child.unref()
+  app.quit()
 }
 
 // Set by ⌘Q; a window held open for flushing then finishes the quit instead of only closing.
@@ -174,7 +231,17 @@ app.whenReady().then(() => {
     openMain: () => openMain()
   })
   applyOpenAtLogin(getOpenAtLogin(db))
-  registerIpc(db, files, sync, mini, openMain, () => {
+  const updater = createUpdater({
+    current: app.getVersion(),
+    platform: process.platform,
+    fetch,
+    tempDir: join(app.getPath('temp'), 'hush-update'),
+    extract: extractApp,
+    cannotInstall,
+    install: installUpdate,
+    emit: (status) => broadcast('updater:status', status)
+  })
+  registerIpc(db, files, sync, mini, updater, openMain, () => {
     mainWindow?.destroy()
     if (quitting) app.quit()
   })
@@ -182,6 +249,10 @@ app.whenReady().then(() => {
   sync.check()
   setInterval(sync.check, SYNC_CHECK_MS)
   app.on('browser-window-focus', sync.check)
+  if (app.isPackaged) {
+    setTimeout(() => updater.check(true), UPDATE_FIRST_CHECK_MS)
+    setInterval(() => updater.check(true), UPDATE_CHECK_MS)
+  }
 
   app.on('activate', () => {
     if (!mainWindow) createWindow()

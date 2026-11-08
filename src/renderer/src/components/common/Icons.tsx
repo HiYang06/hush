@@ -122,6 +122,25 @@ export const SettingsSlidersIcon: React.FC<IconProps> = ({
   </svg>
 )
 
+export const UpdateArrowIcon: React.FC<IconProps> = ({ size = 15, className }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 16 16"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.4"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    aria-hidden="true"
+  >
+    <circle cx="8" cy="8" r="6" />
+    <path d="M8 11V5.2" />
+    <path d="M5.6 7.4L8 5L10.4 7.4" />
+  </svg>
+)
+
 export const ChevronRightIcon: React.FC<
   IconProps & { expanded?: boolean }
 > = ({ size = 11, expanded = false, className }) => (

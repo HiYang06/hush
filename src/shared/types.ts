@@ -389,6 +389,17 @@ export type SyncStatus = {
 // What one sync changed here, so the window reloads just that. notes: note ids (<scope>:<scope_id>).
 export type SyncApplied = { tables: string[]; notes: string[] }
 
+// manual: a newer version exists but this copy can't replace itself; error says why, latest.url has it.
+export type UpdateState = 'idle' | 'checking' | 'latest' | 'available' | 'downloading' | 'ready' | 'failed' | 'manual'
+export type UpdateStatus = {
+  current: string
+  state: UpdateState
+  // url: the release page (更新内容). null after a failed check, so 重试 checks again.
+  latest: { version: string; url: string } | null
+  percent: number
+  error: string | null
+}
+
 export type IpcChannels = {
   'markCategories:list': () => MarkCategory[]
   // A main session's marks, those made in its threads included.
@@ -496,6 +507,11 @@ export type IpcChannels = {
   // While the settings page records a new shortcut, the current one doesn't open the mini window.
   'miniSettings:recording': (recording: boolean) => void
   'miniSettings:setOpenAtLogin': (on: boolean) => void
+  'updater:status': () => UpdateStatus
+  'updater:check': () => void
+  'updater:download': () => void
+  // Quits; the new version opens by itself.
+  'updater:install': () => void
 }
 
 // Every main → renderer push: channel name → payload.
@@ -514,6 +530,7 @@ export type IpcEvents = {
   'mini:hidden': null
   // To the main window: show this session (from the mini window's 在主窗口打开).
   'session:open': string
+  'updater:status': UpdateStatus
 }
 
 export type Api = {

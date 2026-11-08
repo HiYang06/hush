@@ -5,6 +5,7 @@ import { syncNeedsLook, useAppStore } from '@renderer/stores/appStore'
 import { flushNoteSave } from '@renderer/lib/noteSave'
 import { modKey } from '@renderer/lib/platform'
 import { ContextMenu, type MenuItem } from '@renderer/components/common/ContextMenu'
+import { UpdateButton } from './UpdateButton'
 import {
   FolderIcon,
   NotePageIcon,
@@ -423,7 +424,9 @@ export const LeftSidebar: React.FC = () => {
           <span>全局 Note</span>
         </button>
 
-        <button
+        <div className="sidebar-footer-actions">
+          <UpdateButton />
+          <button
           type="button"
           className="sidebar-settings-btn"
           onClick={openSettings}
@@ -432,7 +435,8 @@ export const LeftSidebar: React.FC = () => {
         >
           <SettingsSlidersIcon size={15} />
           {needsLook && <span className="sidebar-settings-dot" />}
-        </button>
+          </button>
+        </div>
       </div>
     </aside>
   )

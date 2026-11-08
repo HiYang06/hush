@@ -12,9 +12,16 @@ mac:
   target:
     - target: dmg
       arch: arm64
+    # The in-app updater replaces the app from this zip; the dmg is for first installs.
+    - target: zip
+      arch: arm64
   icon: build/icon.icns
   category: public.app-category.education
-  identity: null
+  # Ad-hoc signing (no Developer ID): without it the bundle's signature is broken and a downloaded copy
+  # says it is damaged; with it macOS only asks to allow an unidentified developer. Hardened runtime needs
+  # a real identity, so it stays off.
+  identity: '-'
+  hardenedRuntime: false
 dmg:
   artifactName: Hush-${version}-${arch}.${ext}
 win:

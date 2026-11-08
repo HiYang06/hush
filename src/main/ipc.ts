@@ -41,6 +41,7 @@ import { createWebTools } from './search/webTools'
 import { applyOpenAtLogin, type Mini } from './miniWindow'
 import { decryptSecret, encryptSecret } from './secrets'
 import type { SyncService } from './sync/service'
+import type { Updater } from './updater'
 
 // Every request from the window may have written something; sync checks whether anything is waiting to
 // go up, so the repo code never has to tell it (D-067).
@@ -88,6 +89,7 @@ export function registerIpc(
   files: FileStore,
   sync: SyncService,
   mini: Mini,
+  updater: Updater,
   openMain: (sessionId: string) => void,
   onFlushed: () => void
 ): void {
@@ -218,6 +220,10 @@ export function registerIpc(
   handle('sync:status', () => sync.status())
   handle('sync:now', () => sync.check())
   handle('sync:markSeen', () => sync.markSeen())
+  handle('updater:status', () => updater.status())
+  handle('updater:check', () => void updater.check())
+  handle('updater:download', () => void updater.download())
+  handle('updater:install', () => updater.install())
 
   handle('files:add', (input) => files.add(input))
   handle('files:get', (ids) => getFiles(db, ids))

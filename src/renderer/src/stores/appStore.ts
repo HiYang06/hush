@@ -21,7 +21,8 @@ import type {
   ThreadAnchor,
   ThreadContextMode,
   SyncApplied,
-  SyncStatus
+  SyncStatus,
+  UpdateStatus
 } from '@shared/types'
 import { mockSettings } from '@renderer/mock/data'
 import { flushNoteSave, hasPendingNoteSave, sameTarget } from '@renderer/lib/noteSave'
@@ -129,6 +130,7 @@ export interface AppState {
   searchOpen: boolean
   // null until main answers at start-up.
   syncStatus: SyncStatus | null
+  updateStatus: UpdateStatus | null
 
   selectSession: (sessionId: string) => void
   startNewSession: (projectId?: string | null) => void
@@ -244,6 +246,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   newSessionProjectId: null,
   searchOpen: false,
   syncStatus: null,
+  updateStatus: null,
 
   selectSession: (sessionId) => {
     const session = get().sessions.find((s) => s.id === sessionId && s.kind === 'main')
@@ -1056,6 +1059,8 @@ window.api.invoke('fontSize:get').then((fontSize) => {
 
 window.api.invoke('sync:status').then((syncStatus) => useAppStore.setState({ syncStatus }))
 window.api.on('sync:status', (syncStatus) => useAppStore.setState({ syncStatus }))
+window.api.invoke('updater:status').then((updateStatus) => useAppStore.setState({ updateStatus }))
+window.api.on('updater:status', (updateStatus) => useAppStore.setState({ updateStatus }))
 window.api.on('sync:applied', (applied) => void refreshAfterSync(applied))
 
 // Also a session another window just started, e.g. the mini window.
