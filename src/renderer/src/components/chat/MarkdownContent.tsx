@@ -13,7 +13,7 @@ import { ContextMenu } from '@renderer/components/common/ContextMenu'
 import { anchorToRange, offsetsToRange } from '@renderer/lib/anchors'
 import { remarkCitations } from '@renderer/lib/citations'
 import { clearMessage, decorationsAt, drawMessage } from '@renderer/lib/highlights'
-import { gfmOptions, splitBlocks } from '@renderer/lib/markdownBlocks'
+import { gfmOptions, normalizeMathDelimiters, splitBlocks } from '@renderer/lib/markdownBlocks'
 import type { MarkCardState } from '@renderer/stores/appStore'
 import { ShikiCodeBlock } from './ShikiCodeBlock'
 import { hostOf } from './WebActivity'
@@ -56,7 +56,10 @@ const MarkdownContentView: React.FC<MarkdownContentProps> = ({
     [sources]
   )
   // While streaming, close the Markdown the model hasn't finished yet, so a half-written `**` or `$$` doesn't show.
-  const blocks = React.useMemo(() => splitBlocks(streaming ? remend(content) : content), [content, streaming])
+  const blocks = React.useMemo(() => {
+    const markdown = normalizeMathDelimiters(content)
+    return splitBlocks(streaming ? remend(markdown) : markdown)
+  }, [content, streaming])
   const components = React.useMemo<Components>(
     () => ({
       table: ({ children }) => (

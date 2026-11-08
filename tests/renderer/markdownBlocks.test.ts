@@ -5,7 +5,7 @@ import rehypeKatex from 'rehype-katex'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import { describe, expect, it } from 'vitest'
-import { gfmOptions, splitBlocks } from '../../src/renderer/src/lib/markdownBlocks'
+import { gfmOptions, normalizeMathDelimiters, splitBlocks } from '../../src/renderer/src/lib/markdownBlocks'
 
 const render = (markdown: string): string =>
   renderToStaticMarkup(
@@ -64,5 +64,41 @@ describe('splitBlocks', () => {
     const withFootnote = '正文[^1]。\n\n[^1]: 注释'
     expect(splitBlocks(withRef)).toEqual([withRef])
     expect(splitBlocks(withFootnote)).toEqual([withFootnote])
+  })
+})
+
+describe('normalizeMathDelimiters', () => {
+  const n = normalizeMathDelimiters
+
+  it('turns \\(…\\) into inline math', () => {
+    expect(n('恰好 \\(b\\) 个 token')).toBe('恰好 $b$ 个 token')
+    expect(render(n('设 \\(x^2\\) 为'))).toContain('class="katex"')
+  })
+
+  it('turns a \\[…\\] on its own lines into a display block', () => {
+    expect(n('前文\n\\[\nE = mc^2\n\\]\n后文')).toBe('前文\n$$\nE = mc^2\n$$\n后文')
+    expect(n('\\[ a + b \\]')).toBe('$$\na + b\n$$')
+    expect(render(n('前文\n\\[\nE = mc^2\n\\]\n后文'))).toContain('katex-display')
+    expect(render(n('\\[ a + b \\]'))).toContain('katex-display')
+  })
+
+  it('keeps a display block inside its list item or quote', () => {
+    expect(render(n('1. 第一步：\n\n   \\[\n   x = 1\n   \\]'))).toMatch(/<li>[\s\S]*katex-display[\s\S]*<\/li>/)
+    expect(render(n('> 引用\n> \\[ x \\]'))).toMatch(/<blockquote>[\s\S]*katex-display[\s\S]*<\/blockquote>/)
+  })
+
+  it('renders a \\[…\\] inside a sentence inline', () => {
+    expect(n('所以 \\[x\\] 成立')).toBe('所以 $$x$$ 成立')
+  })
+
+  it('leaves code, existing math and LaTeX line breaks alone', () => {
+    const untouched = [
+      '`\\(x\\)`',
+      '```latex\n\\[ x \\]\n```',
+      '$$\na \\\\[2pt] b\n$$',
+      '路径 C:\\\\(x\\\\)',
+      '没有公式'
+    ]
+    for (const s of untouched) expect(n(s), s).toBe(s)
   })
 })
