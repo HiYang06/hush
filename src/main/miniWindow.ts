@@ -54,7 +54,9 @@ export function createMini({
     webPreferences: { preload, contextIsolation: true }
   })
   win.setAlwaysOnTop(true, 'floating')
-  if (isMac) win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  // Without skipTransformProcessType Electron turns the whole app into a UIElement, which removes its dock
+  // icon; a panel floats over full-screen apps without that.
+  if (isMac) win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
   load(win, 'mini')
 
   let maxHeight = Infinity
