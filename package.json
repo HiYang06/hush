@@ -19,7 +19,8 @@
     "icons": "electron scripts/make-icons.mjs",
     "build:ios-web": "vite build --config vite.ios.config.ts",
     "build:mac": "electron-vite build && electron-builder --mac",
-    "build:win": "electron-vite build && electron-builder --win"
+    "build:win": "electron-vite build && electron-builder --win",
+    "release": "scripts/release.sh"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.3.0",

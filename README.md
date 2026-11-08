@@ -90,6 +90,7 @@ npm run typecheck
 npm test
 npm run build:mac    # 打包 dmg 和 zip，输出到 dist/
 npm run build:win    # 打包 Windows 安装包，在 Mac 上也能打
+npm run release -- 0.2.0   # 发版：改版本号、检查、打包两个平台，确认后推送并发布 GitHub Release
 ```
 
 | 目录 | 内容 |
