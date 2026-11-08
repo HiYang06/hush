@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- For 16 and 32 px: no shadow, thicker stroke, and no inner loop, which blurs into the shaft that small. -->
+  <path fill="#FCF4DB" d="M924 512C924 919.1 919.1 924 512 924C104.9 924 100 919.1 100 512C100 104.9 104.9 100 512 100C919.1 100 924 104.9 924 512Z"/>
+  <g transform="translate(100 100) scale(1.1873) translate(-164 -168)" fill="none" stroke="#414D39" stroke-width="44" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M355 607C365 540 395 480 450 440C510 395 570 375 615 350C655 328 675 305 683 270C687 255 697 255 704 266C722 294 731 332 729 367C726 452 672 517 611 564C545 614 470 650 410 650"/>
+    <path d="M640 400C560 440 470 500 410 560C364 614 330 672 305 762"/>
+  </g>
+</svg>

@@ -1,0 +1,140 @@
+:root {
+  color-scheme: light dark;
+
+  /* Typography */
+  /* Bundled like the body faces, so buttons and sidebars look the same on mac and Windows (D-074). */
+  --font-sans: "Noto Sans SC Variable", sans-serif;
+  /* Latin face first so it wins for Latin glyphs; both are bundled so mac and Windows match. */
+  --font-body: "Literata Variable", "LXGW WenKai Screen", serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
+
+  --body-font-size: 16px;
+  --body-line-height: 1.85;
+  --body-font-weight: 500;
+  --body-max-width: 42em;
+  /* 0.8 of a line (product.md); em resolves where it's used, so it follows that element's size. */
+  --paragraph-gap: calc(var(--body-line-height) * 0.8em);
+
+  /* Layout dimensions */
+  --sidebar-width: 240px;
+  --center-min-width: 480px;
+  --header-height: 46px;
+
+  /* Light Mode Palette — Neutral White Paper */
+  --bg-primary: #F9F9F7;
+  /* Base under the paper grain: the grain darkens it ~3% on average, back to --bg-primary. */
+  --bg-paper-base: #FFFFFF;
+  --bg-elevated: #F1F1EF;
+  --bg-panel: #F1F1EF;
+  --bg-input: #FDFDFC;
+  --bg-hover: rgba(42, 44, 47, 0.055);
+  --bg-active: rgba(42, 44, 47, 0.095);
+  --bg-thinking: #F1F1EF;
+  --bg-badge: rgba(42, 44, 47, 0.07);
+  --bg-card: #F1F1EF;
+  --bg-tooltip: #FDFDFC;
+  --bg-floating-pill: #2A2C2F;
+
+  /* Text Colors */
+  --text-primary: #2A2C2F;
+  --text-secondary: #5E6165;
+  --text-muted: #8F9296;
+  --text-faint: #B3B5B7;
+  --text-on-pill: #F9F9F7;
+  --text-danger: #B4453A;
+  --diff-inserted-bg: rgba(62, 158, 98, 0.16);
+  --diff-deleted-bg: rgba(196, 72, 58, 0.13);
+
+  /* Borders & Dividers */
+  --border-subtle: rgba(42, 44, 47, 0.085);
+  --border-default: rgba(42, 44, 47, 0.14);
+  --border-strong: rgba(42, 44, 47, 0.24);
+  --border-input-focus: rgba(42, 44, 47, 0.34);
+
+  /* Accent & Interactive */
+  --accent-primary: #2A2C2F;
+  --accent-primary-hover: #191A1D;
+  --accent-primary-text: #F9F9F7;
+  --accent-link: #3B5B8C;
+  --accent-thread-underline: #8F9296;
+  --accent-clip-underline: rgba(42, 44, 47, 0.28);
+  --accent-flash: rgba(217, 165, 58, 0.24);
+
+  /* Mark Category Colors (Light) */
+  --mark-amber-bg: rgba(226, 160, 42, 0.22);
+  --mark-amber-border: rgba(196, 130, 18, 0.45);
+  --mark-amber-text: #7C5108;
+
+  --mark-blue-bg: rgba(66, 133, 212, 0.18);
+  --mark-blue-border: rgba(52, 112, 186, 0.42);
+  --mark-blue-text: #224F86;
+
+  --mark-green-bg: rgba(62, 158, 98, 0.18);
+  --mark-green-border: rgba(46, 132, 79, 0.42);
+  --mark-green-text: #1F6138;
+
+  /* Shadows — the input sits flat on the paper, outlined only */
+  --shadow-input: 0 0 0 1px var(--border-default);
+  --shadow-input-focus: 0 0 0 1px var(--border-input-focus);
+  --shadow-popover: 0 8px 24px rgba(42, 44, 47, 0.12), 0 0 0 1px var(--border-default);
+  --shadow-pill: 0 4px 14px rgba(42, 44, 47, 0.18);
+
+  /* Shiki syntax default mapping */
+  --shiki-token-mode: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-primary: #18191B;
+    --bg-paper-base: #18191B;
+    --bg-elevated: #1D1E20;
+    --bg-panel: #1D1E20;
+    --bg-input: #212224;
+    --bg-hover: rgba(214, 215, 217, 0.06);
+    --bg-active: rgba(214, 215, 217, 0.11);
+    --bg-thinking: #1D1E20;
+    --bg-badge: rgba(214, 215, 217, 0.09);
+    --bg-card: #1D1E20;
+    --bg-tooltip: #212224;
+    --bg-floating-pill: #D6D7D9;
+
+    --text-primary: #D6D7D9;
+    --text-secondary: #9FA2A6;
+    --text-muted: #72757A;
+    --text-faint: #505256;
+    --text-on-pill: #18191B;
+    --text-danger: #E48A80;
+    --diff-inserted-bg: rgba(72, 174, 110, 0.18);
+    --diff-deleted-bg: rgba(228, 120, 108, 0.16);
+
+    --border-subtle: rgba(214, 215, 217, 0.075);
+    --border-default: rgba(214, 215, 217, 0.13);
+    --border-strong: rgba(214, 215, 217, 0.22);
+    --border-input-focus: rgba(214, 215, 217, 0.32);
+
+    --accent-primary: #D6D7D9;
+    --accent-primary-hover: #E0E1E2;
+    --accent-primary-text: #18191B;
+    --accent-link: #82A8E0;
+    --accent-thread-underline: #72757A;
+    --accent-clip-underline: rgba(214, 215, 217, 0.3);
+    --accent-flash: rgba(226, 168, 62, 0.22);
+
+    --mark-amber-bg: rgba(230, 168, 52, 0.2);
+    --mark-amber-border: rgba(230, 168, 52, 0.42);
+    --mark-amber-text: #F0C065;
+
+    --mark-blue-bg: rgba(78, 148, 230, 0.2);
+    --mark-blue-border: rgba(78, 148, 230, 0.42);
+    --mark-blue-text: #8BBDF5;
+
+    --mark-green-bg: rgba(72, 174, 110, 0.2);
+    --mark-green-border: rgba(72, 174, 110, 0.42);
+    --mark-green-text: #84D9A2;
+
+    --shadow-popover: 0 10px 28px rgba(0, 0, 0, 0.48), 0 0 0 1px var(--border-default);
+    --shadow-pill: 0 4px 16px rgba(0, 0, 0, 0.45);
+
+    --shiki-token-mode: dark;
+  }
+}

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Apple icon grid: an 824 plate centered on the 1024 canvas. The feather is traced in the reference
+       image's coordinates; the transform maps that image's plate onto this one. -->
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="125%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#000" flood-opacity=".22"/>
+    </filter>
+  </defs>
+  <path fill="#FCF4DB" filter="url(#shadow)" d="M924 512C924 919.1 919.1 924 512 924C104.9 924 100 919.1 100 512C100 104.9 104.9 100 512 100C919.1 100 924 104.9 924 512Z"/>
+  <g transform="translate(100 100) scale(1.1873) translate(-164 -168)" fill="none" stroke="#414D39" stroke-width="18" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M355 607C365 540 395 480 450 440C510 395 570 375 615 350C655 328 675 305 683 270C687 255 697 255 704 266C722 294 731 332 729 367C726 452 672 517 611 564C545 614 470 650 410 650C395 650 393 638 402 625C443 573 543 498 612 440C632 422 632 405 618 410C560 430 470 500 410 560C364 614 330 672 305 762"/>
+  </g>
+</svg>

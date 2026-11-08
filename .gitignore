@@ -1,0 +1,18 @@
+node_modules/
+out/
+dist/
+.DS_Store
+*.log
+*.tsbuildinfo
+
+# iOS
+ios/HushCore/.build/
+ios/HushCore/.swiftpm/
+xcuserdata/
+ios/build/
+
+# Kept locally, not open-sourced: development docs and the maintainer's own server setup
+CLAUDE.md
+docs/
+server/deploy/
+server/docker-compose.yml

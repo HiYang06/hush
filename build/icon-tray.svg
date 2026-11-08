@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- The macOS menu bar icon: black on transparent, a template image the system tints for light and dark. -->
+  <g transform="translate(-40 -40) scale(1.5) translate(-164 -168)" fill="none" stroke="#000" stroke-width="64" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M355 607C365 540 395 480 450 440C510 395 570 375 615 350C655 328 675 305 683 270C687 255 697 255 704 266C722 294 731 332 729 367C726 452 672 517 611 564C545 614 470 650 410 650"/>
+    <path d="M640 400C560 440 470 500 410 560C364 614 330 672 305 762"/>
+  </g>
+</svg>

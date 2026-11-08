@@ -1,0 +1,372 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A10000000000000000000010 /* HushCore in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000020 /* HushCore */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		B1000000000000000000000B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A100000000000000000000C0 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A10000000000000000000080;
+			remoteInfo = Hush;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		A10000000000000000000030 /* Hush.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Hush.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B1000000000000000000000A /* HushUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HushUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		A10000000000000000000040 /* Hush */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Hush;
+			sourceTree = "<group>";
+		};
+		B1000000000000000000000C /* HushUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = HushUITests;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A10000000000000000000050 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000010 /* HushCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B1000000000000000000000D /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A10000000000000000000060 = {
+			isa = PBXGroup;
+			children = (
+				A10000000000000000000040 /* Hush */,
+				B1000000000000000000000C /* HushUITests */,
+				A10000000000000000000070 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A10000000000000000000070 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A10000000000000000000030 /* Hush.app */,
+				B1000000000000000000000A /* HushUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A10000000000000000000080 /* Hush */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A100000000000000000000A0 /* Build configuration list for PBXNativeTarget "Hush" */;
+			buildPhases = (
+				A10000000000000000000090 /* Sources */,
+				A10000000000000000000050 /* Frameworks */,
+				A100000000000000000000B0 /* Resources */,
+				A100000000000000000000B1 /* Build reading view */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				A10000000000000000000040 /* Hush */,
+			);
+			name = Hush;
+			packageProductDependencies = (
+				A10000000000000000000020 /* HushCore */,
+			);
+			productName = Hush;
+			productReference = A10000000000000000000030 /* Hush.app */;
+			productType = "com.apple.product-type.application";
+		};
+		B1000000000000000000000E /* HushUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B10000000000000000000010 /* Build configuration list for PBXNativeTarget "HushUITests" */;
+			buildPhases = (
+				B10000000000000000000011 /* Sources */,
+				B1000000000000000000000D /* Frameworks */,
+				B10000000000000000000012 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B1000000000000000000000F /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				B1000000000000000000000C /* HushUITests */,
+			);
+			name = HushUITests;
+			productName = HushUITests;
+			productReference = B1000000000000000000000A /* HushUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A100000000000000000000C0 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2720;
+				LastUpgradeCheck = 2720;
+			};
+			buildConfigurationList = A100000000000000000000D0 /* Build configuration list for PBXProject "Hush" */;
+			developmentRegion = "zh-Hans";
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				"zh-Hans",
+				Base,
+			);
+			mainGroup = A10000000000000000000060;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				A100000000000000000000E0 /* XCLocalSwiftPackageReference "HushCore" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = A10000000000000000000070 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A10000000000000000000080 /* Hush */,
+				B1000000000000000000000E /* HushUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A100000000000000000000B0 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B10000000000000000000012 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		A100000000000000000000B1 /* Build reading view */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Build reading view";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# The reading view is the desktop renderer's own code (ios/web), rebuilt on every build so a change there\n# never ships stale. It reads the whole repo, hence ENABLE_USER_SCRIPT_SANDBOXING = NO on this target.\nexport PATH=\"/opt/homebrew/bin:/usr/local/bin:$PATH\"\ncd \"$SRCROOT/..\"\nnpm run --silent build:ios-web > /dev/null\nrsync -a --delete ios/build/web/ \"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/web/\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A10000000000000000000090 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B10000000000000000000011 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		B1000000000000000000000F /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A10000000000000000000080 /* Hush */;
+			targetProxy = B1000000000000000000000B /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		A100000000000000000000F1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		A100000000000000000000F2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		A100000000000000000000F3 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = Q6K7FZNTM4;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Hush;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = uk.evildentist.hush;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		A100000000000000000000F4 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = Q6K7FZNTM4;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Hush;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = uk.evildentist.hush;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		B10000000000000000000013 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = uk.evildentist.hush.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = Hush;
+			};
+			name = Debug;
+		};
+		B10000000000000000000014 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = uk.evildentist.hush.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = Hush;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A100000000000000000000A0 /* Build configuration list for PBXNativeTarget "Hush" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A100000000000000000000F3 /* Debug */,
+				A100000000000000000000F4 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A100000000000000000000D0 /* Build configuration list for PBXProject "Hush" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A100000000000000000000F1 /* Debug */,
+				A100000000000000000000F2 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B10000000000000000000010 /* Build configuration list for PBXNativeTarget "HushUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B10000000000000000000013 /* Debug */,
+				B10000000000000000000014 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		A100000000000000000000E0 /* XCLocalSwiftPackageReference "HushCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = HushCore;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A10000000000000000000020 /* HushCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = HushCore;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = A100000000000000000000C0 /* Project object */;
+}

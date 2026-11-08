@@ -1,0 +1,24 @@
+{
+  "name": "hush-server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.5",
+    "aws4fetch": "^1.0.20",
+    "hono": "^4.13.14",
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.13",
+    "@electric-sql/pglite-socket": "^0.2.16",
+    "@types/node": "^22.20.5",
+    "@types/pg": "^8.23.1",
+    "typescript": "~5.9.3",
+    "vitest": "^5.0.5"
+  }
+}

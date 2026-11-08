@@ -1,0 +1,39 @@
+/* The desktop sizes everything to a fixed window and scrolls inside it; here the page itself scrolls,
+   so the web view keeps iOS's own scrolling, bounce and tap-the-status-bar-to-top. */
+html,
+body,
+#root {
+  height: auto;
+  overflow: visible;
+  background: var(--bg-primary);
+}
+
+:root {
+  /* The desktop bundles its interface font (D-074); the phone keeps the system's, like its SwiftUI screens. */
+  --font-sans: -apple-system, "PingFang SC", sans-serif;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.reader {
+  padding: 16px 16px 48px;
+}
+
+/* No hover on a phone; copying goes through the system's own text selection. */
+.message-hover-bar {
+  display: none;
+}
+
+.reader .thread-anchor-quote {
+  margin-bottom: 20px;
+}
+
+.reader-empty {
+  padding-top: 30vh;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 15px;
+}

@@ -1,0 +1,26 @@
+appId: com.hush.app
+productName: Hush
+directories:
+  output: dist
+files:
+  - out/**
+  - package.json
+# better-sqlite3 ships Node-API prebuilds for every platform (D-027), so nothing needs compiling, and a
+# rebuild would fail when packaging Windows on a Mac (D-074).
+npmRebuild: false
+mac:
+  target:
+    - target: dmg
+      arch: arm64
+  icon: build/icon.icns
+  category: public.app-category.education
+  identity: null
+dmg:
+  artifactName: Hush-${version}-${arch}.${ext}
+win:
+  target:
+    - target: nsis
+      arch: x64
+  icon: build/icon.ico
+nsis:
+  artifactName: Hush-${version}-setup.${ext}
