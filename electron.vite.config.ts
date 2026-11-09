@@ -5,6 +5,8 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
+    // Electron's own module, not a package, so nothing marks it external by default.
+    build: { rollupOptions: { external: ['original-fs'] } },
     resolve: {
       alias: {
         '@shared': resolve('src/shared')

@@ -1,5 +1,6 @@
 import { createHash } from 'crypto'
-import { mkdtempSync, readFileSync } from 'fs'
+import { mkdirSync, mkdtempSync, readFileSync } from 'fs'
+import { writeFileSync } from 'original-fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { describe, expect, it } from 'vitest'
@@ -8,6 +9,19 @@ import { compareVersions, createUpdater, pickAsset, type Release, type UpdaterDe
 
 const ZIP = Buffer.from('pretend zip')
 const sha = (b: Buffer): string => `sha256:${createHash('sha256').update(b).digest('hex')}`
+
+// An empty but valid asar: a pickle holding the header's size, then a pickle holding the header JSON.
+function emptyAsar(): Buffer {
+  const json = Buffer.from(JSON.stringify({ files: {} }))
+  const header = Buffer.alloc(8 + Math.ceil(json.length / 4) * 4)
+  header.writeUInt32LE(header.length - 4, 0)
+  header.writeUInt32LE(json.length, 4)
+  json.copy(header, 8)
+  const size = Buffer.alloc(8)
+  size.writeUInt32LE(4, 0)
+  size.writeUInt32LE(header.length, 4)
+  return Buffer.concat([size, header])
+}
 
 function release(tag: string, digest = sha(ZIP)): Release {
   return {
@@ -85,6 +99,18 @@ describe('updater', () => {
     updater.install()
     expect(installed).toHaveLength(1)
     expect(installed[0]).toMatch(/Hush\.app$/)
+  })
+
+  // Electron's fs treats an .asar file as a folder, so clearing out the last update's Hush.app used to fail.
+  it('downloads again over the Hush.app a previous update left behind', async () => {
+    const tempDir = join(mkdtempSync(join(tmpdir(), 'hush-updater-')), 'dl')
+    const resources = join(tempDir, 'app', 'Hush.app', 'Contents', 'Resources')
+    mkdirSync(resources, { recursive: true })
+    writeFileSync(join(resources, 'app.asar'), emptyAsar())
+    const { updater } = setup(release('v0.2.0'), { tempDir })
+    await updater.check()
+    await updater.download()
+    expect(updater.status()).toMatchObject({ state: 'ready' })
   })
 
   it('refuses a download whose hash does not match', async () => {

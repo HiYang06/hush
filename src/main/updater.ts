@@ -1,6 +1,8 @@
 import { createHash } from 'crypto'
 import { createWriteStream } from 'fs'
-import { mkdir, rm } from 'fs/promises'
+import { mkdir } from 'fs/promises'
+// Electron's fs treats an .asar file as a folder, so it can't delete the Hush.app a previous update left here.
+import { promises as originalFs } from 'original-fs'
 import { join } from 'path'
 import type { UpdateStatus } from '@shared/types'
 
@@ -117,7 +119,7 @@ export function createUpdater(deps: UpdaterDeps): Updater {
     const target = asset!
     set({ state: 'downloading', percent: 0, error: null })
     try {
-      await rm(deps.tempDir, { recursive: true, force: true })
+      await originalFs.rm(deps.tempDir, { recursive: true, force: true })
       await mkdir(deps.tempDir, { recursive: true })
       const file = join(deps.tempDir, target.name)
       const res = await deps.fetch(target.browser_download_url, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) })
