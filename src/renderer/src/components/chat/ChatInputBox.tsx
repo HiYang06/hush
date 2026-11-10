@@ -1,13 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react'
-import type { Attachment, FileRecord, MainSession, ThinkingLevel } from '@shared/types'
+import type { MainSession, ThinkingLevel } from '@shared/types'
 import { countImages, MAX_IMAGES_PER_MESSAGE, planFile } from '@shared/files'
 import { pastedSessionId } from '@shared/sessionLinks'
 import { effectiveThinkingLevel } from '@shared/thinking'
 import { PaperclipIcon } from '@renderer/components/common/Icons'
-import { prepareFile, UnsupportedFileError } from '@renderer/lib/attachments/prepare'
 import { errorText } from '@renderer/lib/errors'
 import { estimateTokens } from '@renderer/lib/tokens'
-import { streamingReplyIn, useAppStore, type ChatTarget, type ThreadResult } from '@renderer/stores/appStore'
+import { EMPTY_CHAT_DRAFT, streamingReplyIn, useAppStore, type ChatDraft, type PendingFile, type ChatTarget, type ThreadResult } from '@renderer/stores/appStore'
 import { FileCard, PendingFileCard } from './FileCard'
 import { NoteRefPicker, type NoteRef, type NoteRefPickerHandle } from './NoteRefPicker'
 
@@ -24,11 +23,6 @@ function mentionAt(text: string, caret: number): Mention | null {
 }
 
 const NO_BRING_BACKS: ThreadResult[] = []
-
-type SessionRef = Extract<Attachment, { type: 'session_ref' }>
-
-// file is null while the file is still being read, or when reading failed (then error is set).
-type PendingFile = { key: string; name: string; file: FileRecord | null; error: string | null }
 
 interface ChatInputBoxProps {
   placeholder?: string
@@ -105,19 +99,39 @@ const WebInkIcon: React.FC<{ on: boolean }> = ({ on }) => (
   </svg>
 )
 
-export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
+export const ChatInputBox: React.FC<ChatInputBoxProps> = (props) => {
+  const draftKey = useAppStore((s) => {
+    if (props.target !== 'thread') return s.activeSessionId ? `main:${s.activeSessionId}` : `new:${s.newSessionProjectId ?? ''}`
+    if (s.activeThreadId) return `thread:${s.activeThreadId}`
+    const draft = s.draftThread
+    return `thread-draft:${draft ? JSON.stringify([draft.parentSessionId, draft.anchorMessageId, draft.anchorStart, draft.anchorEnd]) : ''}`
+  })
+  return <ChatInput key={draftKey} {...props} draftKey={draftKey} />
+}
+
+const ChatInput: React.FC<ChatInputBoxProps & { draftKey: string }> = ({
   placeholder = '输入问题，Enter 发送，Shift+Enter 换行…',
   compact = false,
   target = 'main',
   refs = true,
-  canOpenSettings = true
+  canOpenSettings = true,
+  draftKey
 }) => {
-  const [text, setText] = useState('')
+  const { text, pending, noteRefs, sessionRefs } = useAppStore((s) => s.chatDrafts[draftKey] ?? EMPTY_CHAT_DRAFT)
+  const updateDraft = useAppStore((s) => s.updateChatDraft)
+  // Async file reads and transcript fetches keep this key even after the input switches conversations.
+  const setField = <K extends keyof ChatDraft>(field: K, value: React.SetStateAction<ChatDraft[K]>): void => {
+    updateDraft(draftKey, (draft) => ({
+      ...draft,
+      [field]: typeof value === 'function' ? (value as (prev: ChatDraft[K]) => ChatDraft[K])(draft[field]) : value
+    }))
+  }
+  const setText = (value: React.SetStateAction<string>): void => setField('text', value)
+  const setPending = (value: React.SetStateAction<PendingFile[]>): void => setField('pending', value)
+  const setNoteRefs = (value: React.SetStateAction<NoteRef[]>): void => setField('noteRefs', value)
+  const setSessionRefs = (value: React.SetStateAction<ChatDraft['sessionRefs']>): void => setField('sessionRefs', value)
   const [openMenu, setOpenMenu] = useState<'model' | 'thinking' | 'search' | null>(null)
-  const [pending, setPending] = useState<PendingFile[]>([])
   const [dragging, setDragging] = useState(false)
-  const [noteRefs, setNoteRefs] = useState<NoteRef[]>([])
-  const [sessionRefs, setSessionRefs] = useState<SessionRef[]>([])
   // A pasted link to a deleted session says so here until the text changes.
   const [notice, setNotice] = useState<string | null>(null)
   // Sending waits for attachments synced from another device to download.
@@ -170,14 +184,14 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
       setPending((prev) => [...prev, { key, name: f.name, file: null, error: null }])
       const update = (patch: Partial<PendingFile>): void =>
         setPending((prev) => prev.map((p) => (p.key === key ? { ...p, ...patch } : p)))
-      prepareFile(f).then(
+      import('@renderer/lib/attachments/prepare').then(({ prepareFile }) => prepareFile(f)).then(
         (file) => {
           addFilesToStore([file])
           update({ file })
         },
         (err) => {
           console.error(err)
-          update({ error: err instanceof UnsupportedFileError ? '不支持这种文件' : '读取失败' })
+          update({ error: err instanceof Error && err.name === 'UnsupportedFileError' ? '不支持这种文件' : '读取失败' })
         }
       )
     }
@@ -221,7 +235,7 @@ export const ChatInputBox: React.FC<ChatInputBoxProps> = ({
   const addSessionRef = async (session: MainSession): Promise<void> => {
     if (sessionRefs.some((r) => r.sessionId === session.id)) return
     const transcript = await window.api.invoke('sessions:transcript', session.id)
-    const ref: SessionRef = { type: 'session_ref', sessionId: session.id, label: `《${session.title}》`, text: transcript }
+    const ref: ChatDraft['sessionRefs'][number] = { type: 'session_ref', sessionId: session.id, label: `《${session.title}》`, text: transcript }
     setSessionRefs((prev) => (prev.some((r) => r.sessionId === ref.sessionId) ? prev : [...prev, ref]))
   }
 

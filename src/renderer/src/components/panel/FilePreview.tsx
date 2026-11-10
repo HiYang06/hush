@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
 import pdfModuleUrl from 'pdfjs-dist/build/pdf.min.mjs?url'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
@@ -381,7 +382,7 @@ export const FileTab: React.FC = () => {
   const activeSessionId = useAppStore((s) => s.activeSessionId)
   const activeFileId = useAppStore((s) => s.activeFileId)
   const sessions = useAppStore((s) => s.sessions)
-  const messages = useAppStore((s) => s.messages)
+  const messages = useAppStore(useShallow((s) => s.messages.filter((m) => m.attachments.some((a) => a.type === 'file'))))
   const files = useAppStore((s) => s.files)
   const openFilePreview = useAppStore((s) => s.openFilePreview)
 

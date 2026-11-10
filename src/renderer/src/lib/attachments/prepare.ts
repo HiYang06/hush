@@ -1,10 +1,10 @@
 import { detectMime, fileKind } from '@shared/files'
 import type { DocumentPage, ExtractedPart, FileRecord } from '@shared/types'
-import { downscale, readPdf, type Encoded } from './media'
-import { extractDocx, extractPptx, withUnicodeSymbols } from './office'
-import { renderSlides } from './slides'
+import { downscale, type Encoded } from './images'
 
-export class UnsupportedFileError extends Error {}
+export class UnsupportedFileError extends Error {
+  override name = 'UnsupportedFileError'
+}
 
 function baseName(name: string): string {
   const dot = name.lastIndexOf('.')
@@ -42,6 +42,7 @@ export async function prepareFile(file: File): Promise<FileRecord> {
       break
     }
     case 'pdf': {
+      const { readPdf } = await import('./media')
       const pdf = await readPdf(data, async (n, image) => (await addImage(`${baseName(file.name)}-${n}`, image)).fileId)
       isScanned = pdf.isScanned
       extracted = [
@@ -51,6 +52,8 @@ export async function prepareFile(file: File): Promise<FileRecord> {
       break
     }
     case 'pptx': {
+      const { extractPptx, withUnicodeSymbols } = await import('./office')
+      const { renderSlides } = await import('./slides')
       const pptx = await withUnicodeSymbols(data.buffer)
       const slides = await extractPptx(pptx)
       const rendered = await renderSlides(
@@ -74,6 +77,7 @@ export async function prepareFile(file: File): Promise<FileRecord> {
       break
     }
     case 'docx': {
+      const { extractDocx } = await import('./office')
       extracted = []
       for (const p of await extractDocx(data.buffer)) {
         extracted.push(p.type === 'text' ? p : await addImage(`${baseName(file.name)}-${p.name}`, p))

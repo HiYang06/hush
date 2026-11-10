@@ -1,3 +1,4 @@
+import { aimScroll } from '../lib/aimScroll'
 import { create } from 'zustand'
 import type {
   Attachment,
@@ -36,7 +37,7 @@ import {
   revealNoteClip,
   revealNoteTerms,
   syncNoteContent
-} from '@renderer/components/note-editor/NoteEditor'
+} from '@renderer/lib/noteContent'
 
 export type RightPanelTab = 'thread' | 'mark' | 'note' | 'file'
 
@@ -61,6 +62,16 @@ export type MarkCardState = { x: number; top: number; bottom: number } & (
 )
 
 export type ThreadResult = Extract<Attachment, { type: 'thread_result' }>
+export type PendingFile = { key: string; name: string; file: FileRecord | null; error: string | null }
+export type ChatDraft = {
+  text: string
+  pending: PendingFile[]
+  noteRefs: Extract<Attachment, { type: 'note_ref' }>[]
+  sessionRefs: Extract<Attachment, { type: 'session_ref' }>[]
+}
+export const EMPTY_CHAT_DRAFT: ChatDraft = { text: '', pending: [], noteRefs: [], sessionRefs: [] }
+export type ReadingPosition = { messageId: string; offset: number; scrollTop: number; sentQuestionId: string | null }
+
 export type MarkQuiz = Extract<Attachment, { type: 'mark_quiz' }>
 
 export type SearchHit =
@@ -87,6 +98,13 @@ export interface AppState {
   fontSize: number
 
   activeSessionId: string | null
+  chatDrafts: Record<string, ChatDraft>
+  updateChatDraft: (key: string, update: (draft: ChatDraft) => ChatDraft) => void
+  readingPositions: Record<string, ReadingPosition>
+  saveReadingPosition: (sessionId: string, position: ReadingPosition) => void
+  loadingConversations: Record<string, boolean>
+  // Set before any asynchronous jump work, so restoring a conversation cannot compete with it.
+  messageJump: { messageId: string } | null
   expandedProjectIds: Record<string, boolean>
   leftSidebarOpen: boolean
   leftSidebarManualOverride: boolean | null
@@ -215,6 +233,16 @@ export const useAppStore = create<AppState>((set, get) => ({
   fontSize: 16,
 
   activeSessionId: null,
+  chatDrafts: {},
+  updateChatDraft: (key, update) => set((state) => ({
+    chatDrafts: { ...state.chatDrafts, [key]: update(state.chatDrafts[key] ?? EMPTY_CHAT_DRAFT) }
+  })),
+  readingPositions: {},
+  saveReadingPosition: (sessionId, position) => set((state) => ({
+    readingPositions: { ...state.readingPositions, [sessionId]: position }
+  })),
+  loadingConversations: {},
+  messageJump: null,
   expandedProjectIds: {},
   leftSidebarOpen: true,
   leftSidebarManualOverride: null,
@@ -252,6 +280,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     const session = get().sessions.find((s) => s.id === sessionId && s.kind === 'main')
     set({
       activeSessionId: sessionId,
+      loadingConversations: { ...get().loadingConversations, [sessionId]: true },
+      messageJump: null,
+      highlightedMessageId: null,
       noteExpandedToCenter: false,
       activeNoteTarget: null,
       // The thread tab opens on the list until a thread is picked (product.md).
@@ -270,6 +301,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   startNewSession: (projectId = null) => {
     set({
       activeSessionId: null,
+      messageJump: null,
+      highlightedMessageId: null,
       newSessionProjectId: projectId,
       markQuiz: null,
       projectSettingsId: null,
@@ -352,7 +385,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => ({
       noteExpandedToCenter: !state.noteExpandedToCenter,
       rightPanelOpen: true,
-      rightPanelTab: 'note'
+      rightPanelTab: 'note',
+      markCard: null,
+      messageJump: null,
+      highlightedMessageId: null
     }))
   },
 
@@ -544,19 +580,30 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   // The message may be in another conversation (a link in a project or global note).
   jumpToMessage: async (messageId, flash) => {
+    const jump = { messageId }
+    set({ messageJump: jump, highlightedMessageId: null, lastScrolledUserMessageId: null, settingsOpen: false, projectSettingsId: null })
     let msg = get().messages.find((m) => m.id === messageId)
     if (!msg) {
       msg = (await window.api.invoke('messages:get', messageId)) ?? undefined
-      if (!msg) return
+      if (get().messageJump !== jump) return
+      if (!msg) {
+        set({ messageJump: null })
+        return
+      }
       const { sessionId } = msg
       const session = get().sessions.find((s) => s.id === sessionId)
       const mainId = session?.kind === 'thread' ? session.parentSessionId : sessionId
       get().selectSession(mainId)
+      set({ messageJump: jump })
       // Highlighting scrolls to the element, so it waits until the conversation is in the window.
-      await waitFor(() => get().messages.some((m) => m.id === messageId))
+      await waitFor(() => get().messageJump !== jump || get().messages.some((m) => m.id === messageId))
     }
+    if (get().messageJump !== jump) return
     const session = get().sessions.find((s) => s.id === msg.sessionId)
-    if (!session) return
+    if (!session) {
+      set({ messageJump: null })
+      return
+    }
 
     if (session.kind === 'thread') {
       set({
@@ -575,11 +622,20 @@ export const useAppStore = create<AppState>((set, get) => ({
         highlightedMessageId: flash ? null : messageId
       })
     }
-    if (flash) return flashMessagePassages(messageId, flash)
+    const mainId = session.kind === 'thread' ? session.parentSessionId : session.id
+    if (get().loadingConversations[mainId]) {
+      await waitFor(() => get().messageJump !== jump || !get().loadingConversations[mainId])
+      if (get().messageJump !== jump) return
+    }
+    if (flash) {
+      await flashMessagePassages(messageId, flash)
+      if (get().messageJump === jump) set({ messageJump: null })
+      return
+    }
 
     setTimeout(() => {
-      if (get().highlightedMessageId === messageId || get().highlightedMessageId === session.anchorMessageId) {
-        set({ highlightedMessageId: null })
+      if (get().messageJump === jump) {
+        set({ highlightedMessageId: null, messageJump: null })
       }
     }, 2000)
   },
@@ -644,6 +700,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setWebSearch: (on) => {
     set({ webSearch: on })
+    void window.api.invoke('webSearch:set', on)
   },
 
   reloadSearchServices: async () => {
@@ -734,13 +791,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     })
   },
 
-  openProjectSettings: (projectId) => set({ projectSettingsId: projectId, settingsOpen: false }),
+  openProjectSettings: (projectId) => set({ projectSettingsId: projectId, settingsOpen: false, markCard: null, messageJump: null, highlightedMessageId: null }),
   closeProjectSettings: () => set({ projectSettingsId: null }),
 
-  openSettings: () => set({ settingsOpen: true, settingsSection: null, projectSettingsId: null }),
-  openSearchSettings: () => set({ settingsOpen: true, settingsSection: 'search', projectSettingsId: null }),
+  openSettings: () => set({ settingsOpen: true, settingsSection: null, projectSettingsId: null, markCard: null, messageJump: null, highlightedMessageId: null }),
+  openSearchSettings: () => set({ settingsOpen: true, settingsSection: 'search', projectSettingsId: null, markCard: null, messageJump: null, highlightedMessageId: null }),
   closeSettings: () => set({ settingsOpen: false }),
-  setOnboardingOpen: (open) => set({ onboardingOpen: open }),
+  setOnboardingOpen: (open) => set({ onboardingOpen: open, markCard: null, messageJump: null, highlightedMessageId: null }),
 
   setFontSize: (size) => {
     const clamped = Math.min(24, Math.max(12, Math.round(size)))
@@ -823,6 +880,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       markQuiz: null,
       messages: [...curr.messages, userMessage, assistantMessage],
       lastScrolledUserMessageId: userMessage.id,
+      messageJump: null,
+      highlightedMessageId: null,
       noteExpandedToCenter: false
     }))
   },
@@ -909,25 +968,38 @@ useAppStore.subscribe((state) => {
   else window.api.invoke('notes:get', target).then((saved) => setNoteClips(target, noteContentOf(target) ?? saved))
 })
 
-// After a jump that switched conversations, the message shows up a few frames later, and its first
-// frame still has content-visibility's placeholder height: scrolling then would aim at the wrong spot.
+// A cross-conversation jump can precede React mounting its message.
 async function flashMessagePassages(messageId: string, find: (body: Element) => Range[]): Promise<void> {
+  const jump = useAppStore.getState().messageJump
   let el: HTMLElement | null = null
-  let height = -1
   for (let frame = 0; frame < 60; frame++) {
+    if (useAppStore.getState().messageJump !== jump) return
     el = document.getElementById(`message-${messageId}`)
-    const now = el?.getBoundingClientRect().height ?? -1
-    if (el && now === height) break
-    height = now
+    if (el) break
     await new Promise(requestAnimationFrame)
   }
   if (!el) return
   const body = el.querySelector('.markdown-body')
   const ranges = body ? find(body) : []
-  // A hit can span markdown syntax that isn't rendered; the message itself is still the place.
-  const first = ranges[0]?.startContainer.parentElement ?? el
-  first.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  flashPassages(ranges, 2000)
+  const scroller = el.closest<HTMLElement>('.chat-scroll-container, .thread-messages-scroll')
+  if (!scroller) return
+  let finished = (): void => {}
+  await new Promise<void>((resolve) => {
+    const stop = aimScroll(scroller, el, () => {
+      const rect = ranges[0]?.getBoundingClientRect() ?? el.getBoundingClientRect()
+      const viewport = scroller.getBoundingClientRect()
+      return rect.top - viewport.top - (ranges.length ? (scroller.clientHeight - rect.height) / 2 : 18)
+    }, { onSettled: () => {
+      flashPassages(ranges, 2000)
+      resolve()
+    }, onStop: resolve })
+    const unsubscribe = useAppStore.subscribe((state) => {
+      if (state.messageJump === jump) return
+      stop()
+      resolve()
+    })
+    finished = unsubscribe
+  }).finally(() => finished())
 }
 
 function waitFor(ready: () => boolean): Promise<void> {
@@ -968,26 +1040,33 @@ export function syncNeedsLook(status: SyncStatus | null): boolean {
 
 // A main session's messages (its threads' included) and marks, from the database. A reply still streaming
 // keeps its in-memory copy: the database only has it as of the last save, up to 0.5s behind.
+const conversationLoads = new Map<string, object>()
+
 function loadConversation(sessionId: string): void {
+  const request = {}
+  conversationLoads.set(sessionId, request)
   window.api.invoke('marks:list', sessionId).then((loaded) => {
     useAppStore.setState((state) => ({ marks: [...state.marks.filter((m) => m.sessionId !== sessionId), ...loaded] }))
   })
   window.api.invoke('messages:list', sessionId).then(async (loaded) => {
+    const known = new Set(useAppStore.getState().files.map((f) => f.id))
+    const missing = loaded.flatMap((m) =>
+      m.attachments.flatMap((a) => (a.type === 'file' && !known.has(a.fileId) ? [a.fileId] : []))
+    )
+    const files = missing.length > 0 ? await window.api.invoke('files:get', missing) : []
+    if (conversationLoads.get(sessionId) !== request) return
+    useAppStore.getState().addFiles(files)
     useAppStore.setState((state) => {
       const replaced = conversationIds(state.sessions, (s) => s.id === sessionId)
       const streaming = new Map(state.messages.filter((m) => m.status === 'streaming').map((m) => [m.id, m]))
       return {
+        loadingConversations: { ...state.loadingConversations, [sessionId]: false },
         messages: [
           ...state.messages.filter((m) => !replaced.has(m.sessionId)),
           ...loaded.map((m) => streaming.get(m.id) ?? m)
         ]
       }
     })
-    const known = new Set(useAppStore.getState().files.map((f) => f.id))
-    const missing = loaded.flatMap((m) =>
-      m.attachments.flatMap((a) => (a.type === 'file' && !known.has(a.fileId) ? [a.fileId] : []))
-    )
-    if (missing.length > 0) useAppStore.getState().addFiles(await window.api.invoke('files:get', missing))
   })
 }
 
@@ -1047,6 +1126,14 @@ function setWebBusy(messageId: string, busy: boolean): void {
   useAppStore.setState({ webBusy: busy ? { ...rest, [messageId]: true } : rest })
 }
 
+function reloadWebSearch(): void {
+  void window.api.invoke('webSearch:get').then((webSearch) => useAppStore.setState({ webSearch }))
+}
+
+reloadWebSearch()
+window.addEventListener('focus', reloadWebSearch)
+window.api.on('mini:shown', reloadWebSearch)
+
 window.api.invoke('fontSize:get').then((fontSize) => {
   const size = fontSize || 16
   if (window.api.setZoomFactor) {
@@ -1077,9 +1164,13 @@ window.api.on('session:open', (sessionId) => useAppStore.getState().selectSessio
 window.api.on('chat:event', ({ messageId, event }) => {
   setWebBusy(messageId, event.type === 'step' || event.type === 'sources')
   const patch = (update: (m: Message) => Partial<Message>): void =>
-    useAppStore.setState((state) => ({
-      messages: state.messages.map((m) => (m.id === messageId ? { ...m, ...update(m) } : m))
-    }))
+    useAppStore.setState((state) => {
+      const index = state.messages.findIndex((m) => m.id === messageId)
+      if (index < 0) return state
+      const messages = state.messages.slice()
+      messages[index] = { ...messages[index], ...update(messages[index]) }
+      return { messages }
+    })
   // Thinking ends where the answer starts, or where the reply ends without one.
   const endThinking = (): Partial<Message> => {
     const startedAt = thinkingStartedAt.get(messageId)

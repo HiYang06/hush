@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { Message } from '@shared/types'
+import { aimScroll } from '../../lib/aimScroll'
 
 const ROW = 8
 const MIN_ROW = 2
@@ -20,33 +21,38 @@ const flatten = (text: string): string => text.replace(/\s+/g, ' ').trim()
 const plainStart = (markdown: string): string =>
   flatten(
     markdown
-      .replace(/<thinking>[\s\S]*?<\/thinking>|<[^>]+>/g, ' ')
       .slice(0, 400)
+      .replace(/<thinking>(?:[\s\S]*?<\/thinking>|[\s\S]*$)|<[^>]+>/g, ' ')
       .replace(/[#>*_`~|]+|-{3,}|^\s*[-+]\s|\[\^?\d+\]/gm, ' ')
   )
 
-function roundsOf(messages: Message[]): Round[] {
-  const rounds: Round[] = []
-  let chars = 0
-  for (const msg of messages) {
-    if (msg.role === 'user') {
-      rounds.push({
-        questionId: msg.id,
-        question: flatten(msg.content) || '（附件）',
-        answer: '',
-        length: 0
-      })
-      chars = msg.content.length
-    } else if (rounds.length > 0) {
-      chars += msg.content.length
-      rounds[rounds.length - 1].answer = plainStart(msg.content)
+export function createRoundSummaries(): (messages: Message[]) => Round[] {
+  const cache = new WeakMap<Message, { replies: Message[]; round: Round }>()
+  return (messages) => {
+    const rounds: Round[] = []
+    for (let i = 0; i < messages.length;) {
+      const question = messages[i++]
+      if (question.role !== 'user') continue
+      const replies: Message[] = []
+      while (i < messages.length && messages[i].role !== 'user') replies.push(messages[i++])
+      const previous = cache.get(question)
+      if (previous && previous.replies.length === replies.length &&
+        replies.every((reply, index) => reply === previous.replies[index])) {
+        rounds.push(previous.round)
+        continue
+      }
+      const chars = replies.reduce((sum, reply) => sum + reply.content.length, question.content.length)
+      const round = {
+        questionId: question.id,
+        question: previous?.round.question ?? (flatten(question.content) || '（附件）'),
+        answer: replies.length ? plainStart(replies[replies.length - 1].content) : '',
+        length: MIN_TICK + Math.min(1, chars / FULL_LENGTH_CHARS) * (MAX_TICK - MIN_TICK)
+      }
+      cache.set(question, { replies, round })
+      rounds.push(round)
     }
-    if (rounds.length > 0) {
-      const t = Math.min(1, chars / FULL_LENGTH_CHARS)
-      rounds[rounds.length - 1].length = MIN_TICK + t * (MAX_TICK - MIN_TICK)
-    }
+    return rounds
   }
-  return rounds
 }
 
 function questionEl(id: string): HTMLElement | null {
@@ -64,7 +70,9 @@ export const RoundRail: React.FC<{
   const [current, setCurrent] = useState(-1)
   const [pointerY, setPointerY] = useState<number | null>(null)
 
-  const rounds = useMemo(() => roundsOf(messages), [messages])
+  const [roundsOf] = useState(createRoundSummaries)
+  const rounds = useMemo(() => roundsOf(messages), [messages, roundsOf])
+  const questionIds = JSON.stringify(rounds.map((round) => round.questionId))
   const row = Math.max(MIN_ROW, Math.min(ROW, (railHeight - RAIL_PADDING * 2) / Math.max(1, rounds.length)))
 
   useLayoutEffect(() => {
@@ -77,16 +85,17 @@ export const RoundRail: React.FC<{
 
   useEffect(() => {
     const scroller = scrollerRef.current
-    if (!scroller || rounds.length < 2) return
+    const ids: string[] = JSON.parse(questionIds)
+    if (!scroller || ids.length < 2) return
     let raf = 0
     const update = (): void => {
       raf = 0
       const atBottom = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2
-      if (atBottom) return setCurrent(rounds.length - 1)
+      if (atBottom) return setCurrent(ids.length - 1)
       const line = scroller.getBoundingClientRect().top + scroller.clientHeight / 3
       let index = 0
-      for (let i = 0; i < rounds.length; i++) {
-        const el = questionEl(rounds[i].questionId)
+      for (let i = 0; i < ids.length; i++) {
+        const el = questionEl(ids[i])
         if (el && el.getBoundingClientRect().top <= line) index = i
         else if (el) break
       }
@@ -95,47 +104,28 @@ export const RoundRail: React.FC<{
     const schedule = (): void => {
       if (!raf) raf = requestAnimationFrame(update)
     }
+    const observer = new ResizeObserver(schedule)
+    observer.observe(scroller)
+    if (scroller.firstElementChild) observer.observe(scroller.firstElementChild)
     update()
     scroller.addEventListener('scroll', schedule, { passive: true })
     return () => {
+      observer.disconnect()
       scroller.removeEventListener('scroll', schedule)
       cancelAnimationFrame(raf)
     }
-  }, [rounds, scrollerRef])
+  }, [questionIds, scrollerRef])
 
   useEffect(() => () => stopAimingRef.current(), [])
 
-  // Off-screen messages only have content-visibility's placeholder height, so the target moves as the ones
-  // in between render. Easing a fifth of the remaining distance each frame, re-measured every frame, follows
-  // it there; a smooth scrollTo would aim at where it used to be.
   const jumpTo = (questionId: string): void => {
     const scroller = scrollerRef.current
     const target = questionEl(questionId)
     if (!scroller || !target) return
     stopAimingRef.current()
-    let raf = 0
-    let frame = 0
-    let still = 0
-    const step = (): void => {
-      const drift = target.getBoundingClientRect().top - scroller.getBoundingClientRect().top - topGap
-      if (Math.abs(drift) < 1) still++
-      else {
-        still = 0
-        scroller.scrollTop += Math.abs(drift) < 4 ? drift : drift * 0.2
-      }
-      // The cap ends it when the target sits too near the bottom to ever reach the top.
-      if (still < 2 && ++frame < 120) raf = requestAnimationFrame(step)
-      else stop()
-    }
-    const stop = (): void => {
-      cancelAnimationFrame(raf)
-      scroller.removeEventListener('wheel', stop)
-      scroller.removeEventListener('pointerdown', stop)
-    }
-    scroller.addEventListener('wheel', stop, { passive: true })
-    scroller.addEventListener('pointerdown', stop)
-    stopAimingRef.current = stop
-    step()
+    stopAimingRef.current = aimScroll(scroller, target,
+      () => target.getBoundingClientRect().top - scroller.getBoundingClientRect().top - topGap,
+      { ease: 0.2 })
   }
 
   if (rounds.length < 2) return null

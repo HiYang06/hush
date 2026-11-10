@@ -5,17 +5,19 @@ import { CenterColumn } from '@renderer/components/chat/CenterColumn'
 import { RightPanel } from '@renderer/components/panel/RightPanel'
 import { SelectionToolbar } from '@renderer/components/chat/SelectionToolbar'
 import { MarkCard } from '@renderer/components/chat/MarkCard'
-import { SettingsView } from '@renderer/components/settings/SettingsView'
-import { ProjectSettingsView } from '@renderer/components/settings/ProjectSettingsView'
-import { Onboarding } from '@renderer/components/onboarding/Onboarding'
-import { SearchDialog } from '@renderer/components/search/SearchDialog'
 import { WindowControls } from '@renderer/components/common/WindowControls'
 import { isWindows } from '@renderer/lib/platform'
+
+const SettingsView = React.lazy(() => import('@renderer/components/settings/SettingsView').then((m) => ({ default: m.SettingsView })))
+const ProjectSettingsView = React.lazy(() => import('@renderer/components/settings/ProjectSettingsView').then((m) => ({ default: m.ProjectSettingsView })))
+const Onboarding = React.lazy(() => import('@renderer/components/onboarding/Onboarding').then((m) => ({ default: m.Onboarding })))
+const SearchDialog = React.lazy(() => import('@renderer/components/search/SearchDialog').then((m) => ({ default: m.SearchDialog })))
 
 export const App: React.FC = () => {
   const rightPanelOpen = useAppStore((s) => s.rightPanelOpen)
   const rightPanelWidth = useAppStore((s) => s.rightPanelWidth)
   const settingsOpen = useAppStore((s) => s.settingsOpen)
+  const noteExpandedToCenter = useAppStore((s) => s.noteExpandedToCenter)
   const onboardingOpen = useAppStore((s) => s.onboardingOpen)
   const closeSettings = useAppStore((s) => s.closeSettings)
   const projectSettingsOpen = useAppStore((s) => s.projectSettingsId !== null)
@@ -51,19 +53,20 @@ export const App: React.FC = () => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent): void => {
       const isMod = e.metaKey || e.ctrlKey
+      const conversationVisible = !settingsOpen && !projectSettingsOpen && !onboardingOpen
 
       // Settings fields save on blur, and these keys unmount the page without one.
       if ((settingsOpen || projectSettingsOpen) && (e.key === 'Escape' || (isMod && e.key.toLowerCase() === 'n'))) {
         ;(document.activeElement as HTMLElement | null)?.blur()
       }
 
-      if (isMod && e.key === '\\') {
+      if (conversationVisible && isMod && e.key === '\\') {
         e.preventDefault()
         toggleLeftSidebar()
         return
       }
 
-      if (isMod && e.key.toLowerCase() === 'j') {
+      if (conversationVisible && isMod && e.key.toLowerCase() === 'j') {
         e.preventDefault()
         toggleRightPanel()
         return
@@ -117,7 +120,7 @@ export const App: React.FC = () => {
         return
       }
 
-      if (e.key === 'Escape' && rightPanelOpen) {
+      if (conversationVisible && e.key === 'Escape' && rightPanelOpen) {
         e.preventDefault()
         closeRightPanel()
       }
@@ -133,6 +136,7 @@ export const App: React.FC = () => {
     closeSettings,
     closeProjectSettings,
     projectSettingsOpen,
+    onboardingOpen,
     rightPanelOpen,
     searchOpen,
     setSearchOpen,
@@ -144,22 +148,24 @@ export const App: React.FC = () => {
 
   return (
     <div className="app-shell">
-      {onboardingOpen ? (
-        <Onboarding />
-      ) : settingsOpen ? (
-        <SettingsView />
-      ) : projectSettingsOpen ? (
-        <ProjectSettingsView />
-      ) : (
-        <>
-          <LeftSidebar />
-          <CenterColumn />
-          <RightPanel />
-          <SelectionToolbar />
-          <MarkCard />
-        </>
-      )}
-      {searchOpen && <SearchDialog />}
+      <React.Suspense fallback={<div style={{ flex: 1, background: 'var(--bg-paper-base)' }} />}>
+        {onboardingOpen ? (
+          <Onboarding />
+        ) : settingsOpen ? (
+          <SettingsView />
+        ) : projectSettingsOpen ? (
+          <ProjectSettingsView />
+        ) : (
+          <>
+            <LeftSidebar />
+            <CenterColumn />
+            <RightPanel />
+            {!noteExpandedToCenter && <SelectionToolbar />}
+            {!noteExpandedToCenter && <MarkCard />}
+          </>
+        )}
+        {searchOpen && <React.Suspense fallback={null}><SearchDialog /></React.Suspense>}
+      </React.Suspense>
       {isWindows && <WindowControls />}
     </div>
   )

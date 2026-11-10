@@ -12,7 +12,9 @@ import {
 } from '@renderer/components/common/Icons'
 import { NoteEditor, scrollNoteToLine, type NoteSelection } from './NoteEditor'
 import { NoteHistory } from './NoteHistory'
-import { OrganizeView, type OrganizeMode } from './OrganizeView'
+import type { OrganizeMode } from './OrganizeView'
+
+const OrganizeView = React.lazy(() => import('./OrganizeView').then((m) => ({ default: m.OrganizeView })))
 
 type TargetRow = { section: string } | { label: string; target: NoteTarget }
 
@@ -117,7 +119,7 @@ export const NoteView: React.FC = () => {
 
   if (organizing && sameTarget(organizing.target, resolvedTarget)) {
     return (
-      <OrganizeView target={resolvedTarget} organize={organizing.organize} onClose={() => setOrganizing(null)} />
+      <React.Suspense fallback={<div style={{ flex: 1, background: 'var(--bg-paper-base)' }} />}><OrganizeView target={resolvedTarget} organize={organizing.organize} onClose={() => setOrganizing(null)} /></React.Suspense>
     )
   }
 

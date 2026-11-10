@@ -5,7 +5,8 @@ import { BookmarkIcon, NotePageIcon } from '@renderer/components/common/Icons'
 import { MessageItem } from './MessageItem'
 import { ChatInputBox } from './ChatInputBox'
 import { RoundRail } from './RoundRail'
-import { NoteView } from '@renderer/components/note-editor/NoteView'
+import { aimScroll } from '../../lib/aimScroll'
+const NoteView = React.lazy(() => import('@renderer/components/note-editor/NoteView').then((m) => ({ default: m.NoteView })))
 
 const NO_MARKS: Mark[] = []
 const NO_THREADS: ThreadSession[] = []
@@ -76,6 +77,23 @@ const CenterHeader: React.FC<{ title: string; actions: boolean }> = ({ title, ac
 }
 
 export const CenterColumn: React.FC = () => {
+  const activeSessionId = useAppStore((s) => s.activeSessionId)
+  const expanded = useAppStore((s) => s.noteExpandedToCenter)
+  const title = useAppStore((s) => s.sessions.find((session) => session.id === s.activeSessionId)?.title ?? '新对话')
+  if (expanded) return (
+    <main className="center-column">
+      <CenterHeader title={title} actions />
+      <div style={{ flex: 1, overflow: 'hidden' }}>
+        <React.Suspense fallback={<div style={{ height: '100%', background: 'var(--bg-paper-base)' }} />}>
+          <NoteView />
+        </React.Suspense>
+      </div>
+    </main>
+  )
+  return <Conversation key={activeSessionId ?? 'new'} />
+}
+
+const Conversation: React.FC = () => {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const lastReplyRef = useRef<HTMLDivElement | null>(null)
@@ -88,7 +106,6 @@ export const CenterColumn: React.FC = () => {
   const noteClips = useAppStore((s) => s.noteClips)
   const markCategories = useAppStore((s) => s.markCategories)
   const files = useAppStore((s) => s.files)
-  const noteExpandedToCenter = useAppStore((s) => s.noteExpandedToCenter)
   const lastScrolledUserMessageId = useAppStore(
     (s) => s.lastScrolledUserMessageId
   )
@@ -146,16 +163,39 @@ export const CenterColumn: React.FC = () => {
     () => groupByMessage(noteClips?.clips ?? NO_CLIPS, (c) => c.messageId),
     [noteClips]
   )
-  // Scroll the newly sent question to the top. The reply under it gets just enough min-height for that,
-  // refitted when the scroller (input box growing, window resizing) or the question changes size, but
-  // without scrolling again, so it never pulls the reader away.
-  useLayoutEffect(() => {
-    if (!lastScrolledUserMessageId) {
-      setHasUnseenBelow(false)
-      return
-    }
+  const loading = useAppStore((s) => activeSessionId ? s.loadingConversations[activeSessionId] : false)
+  const messageJump = useAppStore((s) => s.messageJump)
+  const initialized = useRef(false)
+  const fittedQuestionId = useRef(activeSessionId ? useAppStore.getState().readingPositions[activeSessionId]?.sentQuestionId ?? null : null)
+  if (lastScrolledUserMessageId) fittedQuestionId.current = lastScrolledUserMessageId
+
+  // Store a visible message and its offset, rather than just scrollTop: off-screen placeholders can
+  // have different heights when the conversation mounts again.
+  const savePosition = (): void => {
     const scroller = scrollContainerRef.current
-    const question = document.getElementById(`message-${lastScrolledUserMessageId}`)
+    if (!scroller || !activeSessionId || !initialized.current) return
+    const top = scroller.getBoundingClientRect().top
+    const items = Array.from(scroller.querySelectorAll<HTMLElement>('.message-item'))
+    const anchor = items.find((item) => item.getBoundingClientRect().bottom > top) ?? items.at(-1)
+    if (!anchor) return
+    useAppStore.getState().saveReadingPosition(activeSessionId, {
+      messageId: anchor.id.slice('message-'.length),
+      offset: anchor.getBoundingClientRect().top - top,
+      scrollTop: scroller.scrollTop,
+      sentQuestionId: fittedQuestionId.current
+    })
+  }
+  const savePositionRef = useRef(savePosition)
+  savePositionRef.current = savePosition
+  useLayoutEffect(() => () => {
+    initialized.current = false
+  }, [])
+
+  const fittedId = fittedQuestionId.current
+  const lastMessageId = sessionMessages.at(-1)?.id
+  useLayoutEffect(() => {
+    const scroller = scrollContainerRef.current
+    const question = fittedQuestionId.current ? document.getElementById(`message-${fittedQuestionId.current}`) : null
     const reply = lastReplyRef.current
     if (!scroller || !question || !reply) return
     const fit = (): void => {
@@ -164,36 +204,34 @@ export const CenterColumn: React.FC = () => {
       reply.style.minHeight = `${Math.max(0, scroller.clientHeight - QUESTION_TOP_GAP - paddingBottom - above)}px`
     }
     fit()
-    // Messages above that were off screen render only once scrolled to, and their real height differs from
-    // content-visibility's placeholder, pushing the question down. Re-aim each frame until it stays put,
-    // unless the reader takes over the scrolling first.
-    let frame = 0
-    let still = 0
-    let raf = 0
-    const align = (): void => {
-      const drift = question.getBoundingClientRect().top - scroller.getBoundingClientRect().top - QUESTION_TOP_GAP
-      if (Math.abs(drift) < 1) still++
-      else {
-        scroller.scrollTop += drift
-        still = 0
-      }
-      if (still < 2 && ++frame < 60) raf = requestAnimationFrame(align)
-    }
-    const stopAligning = (): void => cancelAnimationFrame(raf)
-    align()
-    scroller.addEventListener('wheel', stopAligning, { passive: true })
-    scroller.addEventListener('pointerdown', stopAligning)
     const observer = new ResizeObserver(fit)
     observer.observe(scroller)
     observer.observe(question)
     return () => {
-      stopAligning()
-      scroller.removeEventListener('wheel', stopAligning)
-      scroller.removeEventListener('pointerdown', stopAligning)
       observer.disconnect()
       reply.style.minHeight = ''
     }
-  }, [lastScrolledUserMessageId])
+  }, [currentSession?.id, fittedId, lastMessageId])
+
+  useLayoutEffect(() => {
+    const scroller = scrollContainerRef.current
+    if (!scroller || !activeSessionId || loading || sessionMessages.length === 0) return
+    const saved = useAppStore.getState().readingPositions[activeSessionId]
+    const opening = !initialized.current
+    initialized.current = true
+    const question = fittedQuestionId.current ? document.getElementById(`message-${fittedQuestionId.current}`) : null
+
+    const sent = lastScrolledUserMessageId && question && saved?.sentQuestionId !== lastScrolledUserMessageId
+    const lastQuestion = [...sessionMessages].reverse().find((msg) => msg.role === 'user')
+    const restored = opening && saved ? document.getElementById(`message-${saved.messageId}`) : null
+    const target = sent ? question : opening ? restored ?? (lastQuestion ? document.getElementById(`message-${lastQuestion.id}`) : null) : null
+    const gap = !sent && restored && saved ? saved.offset : QUESTION_TOP_GAP
+    if (!messageJump && !highlightedMessageId && target) {
+      return aimScroll(scroller, target,
+        () => target.getBoundingClientRect().top - scroller.getBoundingClientRect().top - gap,
+        { onSettled: () => savePositionRef.current() })
+    }
+  }, [activeSessionId, loading, lastScrolledUserMessageId, messageJump, highlightedMessageId, sessionMessages.length])
 
   // Check if streaming content extends below the visible viewport
   const streamingMsg = useMemo(
@@ -216,14 +254,18 @@ export const CenterColumn: React.FC = () => {
 
   // Scroll to highlighted message when clicked from Mark or Note
   useEffect(() => {
-    if (!highlightedMessageId) return
+    if (!highlightedMessageId || loading) return
     const el = document.getElementById(`message-${highlightedMessageId}`)
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    const scroller = scrollContainerRef.current
+    if (el && scroller) {
+      return aimScroll(scroller, el,
+        () => el.getBoundingClientRect().top - scroller.getBoundingClientRect().top - QUESTION_TOP_GAP,
+        { onSettled: () => savePositionRef.current() })
     }
-  }, [highlightedMessageId])
+  }, [highlightedMessageId, loading])
 
   const handleScroll = (): void => {
+    savePosition()
     const container = scrollContainerRef.current
     const endEl = messagesEndRef.current
     if (!container || !endEl) return
@@ -247,17 +289,6 @@ export const CenterColumn: React.FC = () => {
     const delta = endRect.top - containerRect.bottom + 48
     container.scrollBy({ top: delta, behavior: 'smooth' })
     setHasUnseenBelow(false)
-  }
-
-  if (noteExpandedToCenter) {
-    return (
-      <main className="center-column">
-        <CenterHeader title={currentSession?.title ?? '新对话'} actions />
-        <div style={{ flex: 1, overflow: 'hidden' }}>
-          <NoteView />
-        </div>
-      </main>
-    )
   }
 
   // Blank new conversation view: only centered input box
@@ -290,7 +321,7 @@ export const CenterColumn: React.FC = () => {
     <main className="center-column">
       <CenterHeader title={currentSession.title} actions />
 
-      <div className="chat-scroll-area">
+      <div className="chat-scroll-area" style={{ visibility: loading && !initialized.current ? 'hidden' : undefined }}>
         <div
           ref={scrollContainerRef}
           className="chat-scroll-container"
@@ -300,7 +331,7 @@ export const CenterColumn: React.FC = () => {
             {sessionMessages.map((msg, idx) => {
               const isLastRound = idx >= sessionMessages.length - 2
               const isLastAssistantAfterSend =
-                Boolean(lastScrolledUserMessageId) &&
+                Boolean(fittedQuestionId.current) &&
                 idx === sessionMessages.length - 1 &&
                 msg.role === 'assistant'
 

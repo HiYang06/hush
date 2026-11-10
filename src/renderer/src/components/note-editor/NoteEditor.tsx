@@ -18,6 +18,7 @@ import type { NoteClipSource, NoteTarget } from '@shared/types'
 import { HUSH_LINK, noteClips } from '@shared/noteClips'
 import { sourceTermMatches } from '@shared/search'
 import { flushNoteSave, sameTarget, scheduleNoteSave } from '@renderer/lib/noteSave'
+import { emitNoteContent, noteContentOf, registerNoteEditor } from '@renderer/lib/noteContent'
 import { isWindows } from '@renderer/lib/platform'
 import { livePreview, previewLinkClick } from './livePreview'
 import { mathSyntax } from './mathSyntax'
@@ -38,25 +39,6 @@ let live: {
 export type NoteSelection = { from: number; to: number; text: string }
 
 const keyOf = (target: NoteTarget): string => `${target.scope}:${target.scopeId}`
-
-// Every change to a note's text, typed or written by the main process; the conversation's replies
-// follow it to show what the note clipped.
-type ContentListener = (target: NoteTarget, content: string) => void
-const contentListeners = new Set<ContentListener>()
-
-export function onNoteContent(listener: ContentListener): void {
-  contentListeners.add(listener)
-}
-
-function emitContent(target: NoteTarget, content: string): void {
-  for (const listener of contentListeners) listener(target, content)
-}
-
-// The editor's text runs up to 0.5s ahead of the database (lib/noteSave.ts); null when not loaded.
-export function noteContentOf(target: NoteTarget): string | null {
-  if (live && sameTarget(live.target, target)) return live.view.state.doc.toString()
-  return states.get(keyOf(target))?.doc.toString() ?? null
-}
 
 // A clip opened from a reply flashes whole lines, like a message opened from its link; ⌘K hits flash
 // just the words.
@@ -196,7 +178,7 @@ function createState(target: NoteTarget, content: string, callbacks: EditorCallb
         const content = update.state.doc.toString()
         if (!update.transactions.some((tr) => tr.annotation(fromMain))) scheduleNoteSave(target, content)
         if (live?.view === update.view) live.onChange(content)
-        emitContent(target, content)
+        emitNoteContent(target, content)
       })
     ]
   })
@@ -210,7 +192,7 @@ function commonPrefixLength(a: string, b: string): number {
 
 // Brings an open or cached editor up to what the main process wrote. Applied as a change rather than
 // a reset, so ⌘Z can take it back.
-export function syncNoteContent(target: NoteTarget, content: string): void {
+function syncEditorContent(target: NoteTarget, content: string): void {
   const changeFor = (state: EditorState) => {
     const current = state.doc.toString()
     const from = commonPrefixLength(current, content)
@@ -225,14 +207,16 @@ export function syncNoteContent(target: NoteTarget, content: string): void {
   }
   const cached = states.get(keyOf(target))
   if (cached) states.set(keyOf(target), cached.update(changeFor(cached)).state)
-  emitContent(target, content)
 }
 
 // For a note that was deleted (with its session or project, or merged away).
-export function forgetNoteState(target: NoteTarget): void {
+function forgetEditorState(target: NoteTarget): void {
   states.delete(keyOf(target))
   if (live && sameTarget(live.target, target)) live.forgotten = true
 }
+
+registerNoteEditor({ sync: syncEditorContent, forget: forgetEditorState })
+export { syncNoteContent } from '@renderer/lib/noteContent'
 
 export function scrollNoteToLine(lineIndex: number): void {
   if (!live) return
@@ -335,6 +319,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({ target, onChange, onJump
       view = new EditorView({ state, parent: hostRef.current! })
       live = { target, view, onChange: (content) => onChangeRef.current(content), forgotten: false }
       onChangeRef.current(state.doc.toString())
+      emitNoteContent(target, state.doc.toString())
       if (pendingReveal && sameTarget(pendingReveal.target, target)) {
         reveal(view, pendingReveal.locate)
         pendingReveal = null
@@ -348,7 +333,7 @@ export const NoteEditor: React.FC<NoteEditorProps> = ({ target, onChange, onJump
       window.api.invoke('notes:get', target).then((content) => {
         if (!cancelled)
           mount(
-            createState(target, content, {
+            createState(target, noteContentOf(target) ?? content, {
               onJumpToMessage: (id) => callbacksRef.current.onJumpToMessage(id),
               onOpenSession: (id) => callbacksRef.current.onOpenSession(id),
               onSelectionMenu: (x, y, selection) => callbacksRef.current.onSelectionMenu(x, y, selection)

@@ -3,7 +3,7 @@
 import pdfModuleUrl from 'pdfjs-dist/build/pdf.min.mjs?url'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { charCount, IMAGE_MAX_EDGE } from '@shared/files'
-import { encode, type Encoded } from './media'
+import { encode, type Encoded } from './images'
 
 // Charts are ECharts on a canvas, whose entry animation runs about a second.
 const CHART_ANIMATION_MS = 1_200

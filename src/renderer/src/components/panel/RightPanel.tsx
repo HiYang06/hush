@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import type { Mark, Message, NoteClipSource, ThreadContextMode, ThreadSession } from '@shared/types'
 import { ContextMenu } from '@renderer/components/common/ContextMenu'
 import { useAppStore, type RightPanelTab } from '@renderer/stores/appStore'
@@ -12,13 +13,21 @@ import {
 } from '@renderer/components/common/Icons'
 import { MessageItem } from '@renderer/components/chat/MessageItem'
 import { ChatInputBox } from '@renderer/components/chat/ChatInputBox'
-import { NoteView } from '@renderer/components/note-editor/NoteView'
-import { FileTab } from './FilePreview'
+const NoteView = React.lazy(() => import('@renderer/components/note-editor/NoteView').then((m) => ({ default: m.NoteView })))
+const FileTab = React.lazy(() => import('./FilePreview').then((m) => ({ default: m.FileTab })))
 
 const NO_MARKS: Mark[] = []
 const NO_CLIPS: NoteClipSource[] = []
 // The seeded 疑问 category; matched by id so renaming it keeps the button.
 const QUESTION_CATEGORY_ID = 'cat-question'
+
+// A message's session and sequence are fixed for its id; streaming only changes its body/status.
+function useMessagePositions(): Map<string, { sessionId: string; seq: number }> {
+  const ids = useAppStore(useShallow((s) => s.messages.map((m) => m.id)))
+  return useMemo(() => new Map(useAppStore.getState().messages.map((m) =>
+    [m.id, { sessionId: m.sessionId, seq: m.seq }]
+  )), [ids])
+}
 
 const ThreadModeSwitch: React.FC<{
   mode: ThreadContextMode
@@ -51,7 +60,8 @@ const ThreadTab: React.FC = () => {
   const activeThreadId = useAppStore((s) => s.activeThreadId)
   const draftThread = useAppStore((s) => s.draftThread)
   const sessions = useAppStore((s) => s.sessions)
-  const messages = useAppStore((s) => s.messages)
+  const positions = useMessagePositions()
+  const messages = useAppStore(useShallow((s) => s.messages.filter((m) => m.sessionId === activeThreadId)))
   const marks = useAppStore((s) => s.marks)
   const noteClips = useAppStore((s) => s.noteClips)
   const markCategories = useAppStore((s) => s.markCategories)
@@ -66,15 +76,20 @@ const ThreadTab: React.FC = () => {
 
   // In the order their passages appear in the conversation, like the Mark page.
   const sessionThreads = useMemo(() => {
-    const seqOf = new Map(messages.map((m) => [m.id, m.seq]))
     return sessions
       .filter((s): s is ThreadSession => s.kind === 'thread' && s.parentSessionId === activeSessionId)
       .sort(
         (a, b) =>
-          (seqOf.get(a.anchorMessageId) ?? 0) - (seqOf.get(b.anchorMessageId) ?? 0) ||
+          (positions.get(a.anchorMessageId)?.seq ?? 0) - (positions.get(b.anchorMessageId)?.seq ?? 0) ||
           a.anchorStart - b.anchorStart
       )
-  }, [activeSessionId, sessions, messages])
+  }, [activeSessionId, sessions, positions])
+
+  const messageCounts = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const { sessionId } of positions.values()) counts.set(sessionId, (counts.get(sessionId) ?? 0) + 1)
+    return counts
+  }, [positions])
 
   const currentThread = sessionThreads.find((t) => t.id === activeThreadId) ?? null
   const draft = !currentThread && draftThread?.parentSessionId === activeSessionId ? draftThread : null
@@ -185,7 +200,7 @@ const ThreadTab: React.FC = () => {
           >
             <div className="thread-list-card-top">
               <span>{t.contextMode === 'fork' ? 'Fork' : 'New'}</span>
-              <span>{messages.filter((m) => m.sessionId === t.id).length} 条消息</span>
+              <span>{messageCounts.get(t.id) ?? 0} 条消息</span>
             </div>
             <div className="thread-list-quote">「{t.anchorQuote}」</div>
           </button>
@@ -213,27 +228,140 @@ const ThreadTab: React.FC = () => {
   )
 }
 
-export const RightPanel: React.FC = () => {
-  const [dragging, setDragging] = useState(false)
-
-  const rightPanelOpen = useAppStore((s) => s.rightPanelOpen)
-  const noteExpandedToCenter = useAppStore((s) => s.noteExpandedToCenter)
-  const rightPanelTab = useAppStore((s) => s.rightPanelTab)
-  const rightPanelWidth = useAppStore((s) => s.rightPanelWidth)
+const MarkTab: React.FC = () => {
   const activeSessionId = useAppStore((s) => s.activeSessionId)
   const sessions = useAppStore((s) => s.sessions)
-  const messages = useAppStore((s) => s.messages)
+  const positions = useMessagePositions()
   const marks = useAppStore((s) => s.marks)
   const markCategories = useAppStore((s) => s.markCategories)
   const selectedMarkCategoryId = useAppStore((s) => s.selectedMarkCategoryId)
+  const setSelectedMarkCategory = useAppStore((s) => s.setSelectedMarkCategory)
+  const jumpToMark = useAppStore((s) => s.jumpToMark)
+  const startMarkQuiz = useAppStore((s) => s.startMarkQuiz)
+
+  // Order marks by position in the conversation (main message seq -> thread vs main -> offset)
+  const orderedSessionMarks = useMemo(() => {
+    const sessionMarks = marks.filter((m) => m.sessionId === activeSessionId)
+
+    const getSortTuple = (markId: string): [number, number, number, number] => {
+      const mark = sessionMarks.find((m) => m.id === markId)
+      if (!mark) return [9999, 0, 0, 0]
+      const msg = positions.get(mark.messageId)
+      if (!msg) return [9999, 0, 0, mark.startOffset]
+      const sess = sessions.find((s) => s.id === msg.sessionId)
+      if (!sess || sess.kind === 'main') {
+        return [msg.seq, 0, 0, mark.startOffset]
+      }
+      const anchorMsg = positions.get(sess.anchorMessageId)
+      const anchorSeq = anchorMsg?.seq ?? 9999
+      return [anchorSeq, 1, msg.seq, mark.startOffset]
+    }
+
+    return [...sessionMarks].sort((a, b) => {
+      const ta = getSortTuple(a.id)
+      const tb = getSortTuple(b.id)
+      for (let i = 0; i < 4; i++) {
+        if (ta[i] !== tb[i]) return ta[i] - tb[i]
+      }
+      return 0
+    })
+  }, [activeSessionId, marks, positions, sessions])
+
+  const filteredMarks = useMemo(() => {
+    if (!selectedMarkCategoryId) return orderedSessionMarks
+    return orderedSessionMarks.filter(
+      (m) => m.categoryId === selectedMarkCategoryId
+    )
+  }, [orderedSessionMarks, selectedMarkCategoryId])
+
+  return (
+    <div className="mark-tab-container">
+      <div className="mark-filter-bar">
+        <button
+          type="button"
+          className={`mark-filter-chip ${
+            selectedMarkCategoryId === null ? 'active' : ''
+          }`}
+          onClick={() => setSelectedMarkCategory(null)}
+        >
+          全部 ({orderedSessionMarks.length})
+        </button>
+        {markCategories.map((cat) => {
+          const count = orderedSessionMarks.filter(
+            (m) => m.categoryId === cat.id
+          ).length
+          return (
+            <button
+              key={cat.id}
+              type="button"
+              className={`mark-filter-chip ${
+                selectedMarkCategoryId === cat.id ? 'active' : ''
+              }`}
+              onClick={() => setSelectedMarkCategory(cat.id)}
+            >
+              {cat.name} ({count})
+            </button>
+          )
+        })}
+      </div>
+
+      {selectedMarkCategoryId === QUESTION_CATEGORY_ID && filteredMarks.length > 0 && (
+        <button type="button" className="mark-quiz-btn" onClick={() => startMarkQuiz(filteredMarks)}>
+          拿这些疑问考考我 ›
+        </button>
+      )}
+
+      <div className="mark-list">
+        {filteredMarks.map((mark) => {
+          const cat = markCategories.find((c) => c.id === mark.categoryId)
+          const msg = positions.get(mark.messageId)
+          const sess = sessions.find((s) => s.id === msg?.sessionId)
+          const isFromThread = sess?.kind === 'thread'
+
+          return (
+            <button
+              key={mark.id}
+              type="button"
+              className="mark-card"
+              onClick={() => jumpToMark(mark)}
+            >
+              <div className="mark-card-header">
+                <div className="mark-badges">
+                  {cat && (
+                    <span className={`mark-category-badge ${cat.color}`}>
+                      {cat.name}
+                    </span>
+                  )}
+                  {isFromThread && (
+                    <span className="mark-thread-tag">追问</span>
+                  )}
+                </div>
+              </div>
+
+              <div className="mark-quote-text">{mark.quote}</div>
+
+              {mark.comment && (
+                <div className="mark-comment-text">{mark.comment}</div>
+              )}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+const OpenRightPanel: React.FC = () => {
+  const [dragging, setDragging] = useState(false)
+
+  const noteExpandedToCenter = useAppStore((s) => s.noteExpandedToCenter)
+  const rightPanelTab = useAppStore((s) => s.rightPanelTab)
+  const rightPanelWidth = useAppStore((s) => s.rightPanelWidth)
   const leftSidebarOpen = useAppStore((s) => s.leftSidebarOpen)
 
   const openRightPanelTab = useAppStore((s) => s.openRightPanelTab)
   const closeRightPanel = useAppStore((s) => s.closeRightPanel)
   const setRightPanelWidth = useAppStore((s) => s.setRightPanelWidth)
-  const setSelectedMarkCategory = useAppStore((s) => s.setSelectedMarkCategory)
-  const jumpToMark = useAppStore((s) => s.jumpToMark)
-  const startMarkQuiz = useAppStore((s) => s.startMarkQuiz)
 
   useEffect(() => {
     if (!dragging) return
@@ -257,43 +385,6 @@ export const RightPanel: React.FC = () => {
       window.removeEventListener('mouseup', onMouseUp)
     }
   }, [dragging, leftSidebarOpen, setRightPanelWidth])
-
-  // Order marks by position in the conversation (main message seq -> thread vs main -> offset)
-  const orderedSessionMarks = useMemo(() => {
-    const sessionMarks = marks.filter((m) => m.sessionId === activeSessionId)
-
-    const getSortTuple = (markId: string): [number, number, number, number] => {
-      const mark = sessionMarks.find((m) => m.id === markId)
-      if (!mark) return [9999, 0, 0, 0]
-      const msg = messages.find((m) => m.id === mark.messageId)
-      if (!msg) return [9999, 0, 0, mark.startOffset]
-      const sess = sessions.find((s) => s.id === msg.sessionId)
-      if (!sess || sess.kind === 'main') {
-        return [msg.seq, 0, 0, mark.startOffset]
-      }
-      const anchorMsg = messages.find((m) => m.id === sess.anchorMessageId)
-      const anchorSeq = anchorMsg?.seq ?? 9999
-      return [anchorSeq, 1, msg.seq, mark.startOffset]
-    }
-
-    return [...sessionMarks].sort((a, b) => {
-      const ta = getSortTuple(a.id)
-      const tb = getSortTuple(b.id)
-      for (let i = 0; i < 4; i++) {
-        if (ta[i] !== tb[i]) return ta[i] - tb[i]
-      }
-      return 0
-    })
-  }, [activeSessionId, marks, messages, sessions])
-
-  const filteredMarks = useMemo(() => {
-    if (!selectedMarkCategoryId) return orderedSessionMarks
-    return orderedSessionMarks.filter(
-      (m) => m.categoryId === selectedMarkCategoryId
-    )
-  }, [orderedSessionMarks, selectedMarkCategoryId])
-
-  if (!rightPanelOpen) return null
 
   const tabs: { key: RightPanelTab; label: string; icon: React.ReactNode }[] = [
     { key: 'thread', label: '追问', icon: <ThreadBranchIcon size={13} /> },
@@ -341,90 +432,23 @@ export const RightPanel: React.FC = () => {
       </div>
 
       <div className="right-panel-body no-drag">
+        <React.Suspense fallback={<div style={{ height: '100%', background: 'var(--bg-paper-base)' }} />}>
         {rightPanelTab === 'thread' && <ThreadTab />}
 
-        {rightPanelTab === 'mark' && (
-          <div className="mark-tab-container">
-            <div className="mark-filter-bar">
-              <button
-                type="button"
-                className={`mark-filter-chip ${
-                  selectedMarkCategoryId === null ? 'active' : ''
-                }`}
-                onClick={() => setSelectedMarkCategory(null)}
-              >
-                全部 ({orderedSessionMarks.length})
-              </button>
-              {markCategories.map((cat) => {
-                const count = orderedSessionMarks.filter(
-                  (m) => m.categoryId === cat.id
-                ).length
-                return (
-                  <button
-                    key={cat.id}
-                    type="button"
-                    className={`mark-filter-chip ${
-                      selectedMarkCategoryId === cat.id ? 'active' : ''
-                    }`}
-                    onClick={() => setSelectedMarkCategory(cat.id)}
-                  >
-                    {cat.name} ({count})
-                  </button>
-                )
-              })}
-            </div>
-
-            {selectedMarkCategoryId === QUESTION_CATEGORY_ID && filteredMarks.length > 0 && (
-              <button type="button" className="mark-quiz-btn" onClick={() => startMarkQuiz(filteredMarks)}>
-                拿这些疑问考考我 ›
-              </button>
-            )}
-
-            <div className="mark-list">
-              {filteredMarks.map((mark) => {
-                const cat = markCategories.find((c) => c.id === mark.categoryId)
-                const msg = messages.find((m) => m.id === mark.messageId)
-                const sess = sessions.find((s) => s.id === msg?.sessionId)
-                const isFromThread = sess?.kind === 'thread'
-
-                return (
-                  <button
-                    key={mark.id}
-                    type="button"
-                    className="mark-card"
-                    onClick={() => jumpToMark(mark)}
-                  >
-                    <div className="mark-card-header">
-                      <div className="mark-badges">
-                        {cat && (
-                          <span className={`mark-category-badge ${cat.color}`}>
-                            {cat.name}
-                          </span>
-                        )}
-                        {isFromThread && (
-                          <span className="mark-thread-tag">追问</span>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="mark-quote-text">{mark.quote}</div>
-
-                    {mark.comment && (
-                      <div className="mark-comment-text">{mark.comment}</div>
-                    )}
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-        )}
+        {rightPanelTab === 'mark' && <MarkTab />}
 
         {/* One editor per note at a time: when the note fills the center column, it isn't shown here too. */}
         {rightPanelTab === 'note' &&
           (noteExpandedToCenter ? <div className="note-empty-hint">Note 已放大到中栏</div> : <NoteView />)}
 
         {rightPanelTab === 'file' && <FileTab />}
+        </React.Suspense>
       </div>
     </aside>
   )
+}
+
+export const RightPanel: React.FC = () => {
+  const open = useAppStore((s) => s.rightPanelOpen)
+  return open ? <OpenRightPanel /> : null
 }
