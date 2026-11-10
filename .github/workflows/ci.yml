@@ -16,10 +16,11 @@ jobs:
             server/package-lock.json
       # better-sqlite3 13 ships Node-API prebuilds; no Electron ABI rebuild is needed.
       - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
+      # The desktop sync tests run against the real server in-process, so its packages come first.
       - run: npm ci
         working-directory: server
+      - run: npm run typecheck
+      - run: npm test
       - run: npm run typecheck
         working-directory: server
       - run: npm test
