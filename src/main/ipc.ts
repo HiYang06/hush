@@ -29,9 +29,10 @@ import {
   renameSession,
   setGlobalPrompt
 } from './db/repo/sessions'
-import { getFontSize, getOpenAtLogin, setFontSize, setMiniShortcut, setOpenAtLogin } from './db/repo/settings'
+import { getFontSize, getOpenAtLogin, getWebSearch, setWebSearch, setFontSize, setMiniShortcut, setOpenAtLogin } from './db/repo/settings'
 import type { FileStore } from './files/store'
 import { createChat } from './llm/chat'
+import { createEventBatcher } from './llm/batchEvents'
 import { listRemoteModels } from './llm/listModels'
 import { conversationTranscript, createOrganizer } from './llm/organize'
 import type { Connection } from './llm/types'
@@ -94,22 +95,24 @@ export function registerIpc(
   onFlushed: () => void
 ): void {
   afterRequest = sync.changed
+  const chatEvents = createEventBatcher((messageId, event) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      win.webContents.send('chat:event', { messageId, event })
+    }
+    // A reply only goes up once it's finished.
+    if (event.type === 'done' || event.type === 'error') sync.changed()
+  })
   const chat = createChat({
     db,
     readFile: files.read,
+    checkFile: files.check,
     ensureFile: files.ensure,
     connection: (providerId) => connectionFor(db, providerId),
     webTools: () => {
       const keys = searchKeys(db)
       return Object.keys(keys).length > 0 ? createWebTools(keys) : null
     },
-    emit: (messageId, event) => {
-      for (const win of BrowserWindow.getAllWindows()) {
-        win.webContents.send('chat:event', { messageId, event })
-      }
-      // A reply only goes up once it's finished.
-      if (event.type === 'done' || event.type === 'error') sync.changed()
-    },
+    emit: chatEvents.emit,
     sessionUpdated: (session) => {
       for (const win of BrowserWindow.getAllWindows()) win.webContents.send('session:updated', session)
     }
@@ -160,13 +163,19 @@ export function registerIpc(
   handle('sessions:transcript', (id) => conversationTranscript(db, id))
   handle('globalPrompt:get', () => ({ prompt: getGlobalPrompt(db) }))
   handle('globalPrompt:set', (prompt) => setGlobalPrompt(db, prompt))
+  handle('webSearch:get', () => getWebSearch(db))
+  handle('webSearch:set', (on) => setWebSearch(db, on))
   handle('fontSize:get', () => getFontSize(db))
   handle('fontSize:set', (size) => {
     setFontSize(db, size)
     // The window that changed it zooms itself; the others (the mini window) follow.
     for (const win of BrowserWindow.getAllWindows()) win.webContents.setZoomFactor(getFontSize(db) / 16)
   })
-  handle('messages:list', (sessionId) => chat.withLiveReplies(listConversationMessages(db, sessionId)))
+  handle('messages:list', (sessionId) => {
+    // The live snapshot already includes buffered deltas; send them before returning it.
+    chatEvents.flushAll()
+    return chat.withLiveReplies(listConversationMessages(db, sessionId))
+  })
   handle('messages:get', (id) => findMessage(db, id))
   handle('notes:list', () => listNotes(db))
   handle('notes:get', (target) => getNoteContent(db, target))
@@ -192,7 +201,10 @@ export function registerIpc(
     await chat.fetchFiles(input)
     return chat.regenerate(input)
   })
-  handle('chat:stop', (messageId) => chat.stop(messageId))
+  handle('chat:stop', (messageId) => {
+    chat.stop(messageId)
+    chatEvents.flush(messageId)
+  })
   handle('organize:start', (input) => organizer.start(input))
   handle('organize:stop', (jobId) => organizer.stop(jobId))
 

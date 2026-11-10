@@ -434,6 +434,8 @@ export type IpcChannels = {
   'sessions:transcript': (id: string) => string
   'globalPrompt:get': () => { prompt: string }
   'globalPrompt:set': (prompt: string) => void
+  'webSearch:get': () => boolean
+  'webSearch:set': (on: boolean) => void
   'fontSize:get': () => number
   'fontSize:set': (size: number) => void
   // A main session's messages together with those of all its threads.

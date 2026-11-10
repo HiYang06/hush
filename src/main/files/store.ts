@@ -1,5 +1,5 @@
 import { createHash } from 'crypto'
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
+import { accessSync, constants, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import type Database from 'better-sqlite3'
 import type { FileRecord, NewFile } from '@shared/types'
@@ -7,6 +7,7 @@ import { findFileBySha, insertFile, updateExtraction } from '../db/repo/files'
 
 export type FileStore = {
   add: (input: NewFile) => FileRecord
+  check: (file: FileRecord) => void
   read: (file: FileRecord) => Buffer
   pathOf: (file: FileRecord) => string
   // A file synced from another device is only metadata until it's first needed; this brings its bytes.
@@ -54,6 +55,7 @@ export function createFileStore(db: Database.Database, dir: string, download: Do
         isScanned: input.isScanned
       })
     },
+    check: (file) => accessSync(pathOf(file), constants.R_OK),
     read: (file) => readFileSync(pathOf(file)),
     pathOf,
     ensure(file) {

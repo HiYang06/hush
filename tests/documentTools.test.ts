@@ -69,7 +69,7 @@ describe('document tools', () => {
   const files = new Map<string, LoadedFile>([
     [
       'img3',
-      { record: { ...lecture, id: 'img3', name: 'lecture-3.jpg', mime: 'image/jpeg', extracted: null }, data: Buffer.from('p3') }
+      { record: { ...lecture, id: 'img3', name: 'lecture-3.jpg', mime: 'image/jpeg', extracted: null }, data: () => Buffer.from('p3') }
     ]
   ])
 

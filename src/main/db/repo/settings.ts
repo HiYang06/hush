@@ -46,3 +46,11 @@ export function getOpenAtLogin(db: Database.Database): boolean {
 export function setOpenAtLogin(db: Database.Database, on: boolean): void {
   setSetting(db, 'open_at_login', on ? '1' : '0')
 }
+
+export function getWebSearch(db: Database.Database): boolean {
+  return getSetting(db, 'web_search') !== '0'
+}
+
+export function setWebSearch(db: Database.Database, on: boolean): void {
+  setSetting(db, 'web_search', on ? '1' : '0')
+}

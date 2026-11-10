@@ -200,7 +200,7 @@ export function createDocumentTools(
           const file = files.get(id)
           if (!file) throw new Error(`Page image ${id} was not loaded`)
           const which = page.imageIds.length > 1 ? ` 图 ${i + 1}` : ''
-          images.push({ label: `[${doc.name} 第 ${page.n} 页${which}]`, mime: file.record.mime, data: file.data })
+          images.push({ label: `[${doc.name} 第 ${page.n} 页${which}]`, mime: file.record.mime, data: file.data() })
         })
       } else if (page.tags.length > 0) {
         lines.push(`（这页有${tagText(page)}，当前模型看不到图片，只有自动提取的文字）`)

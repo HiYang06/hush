@@ -23,11 +23,11 @@ export type ContextInput = {
     | 'maxOutputTokens'
   >
   thinking: ThinkingLevel
-  // Every file the messages attach, plus the files derived from them, with their bytes; read by the caller.
+  // Every file the messages attach, plus the files derived from them, with a lazy byte reader supplied by the caller.
   files: Map<string, LoadedFile>
 }
 
-export type LoadedFile = { record: FileRecord; data: Buffer }
+export type LoadedFile = { record: FileRecord; data: () => Buffer }
 
 // Exactly one prompt, the first non-empty one; never concatenated. Empty means no system prompt (D-075).
 export function pickSystemPrompt(projectPrompt: string | null, globalPrompt: string): string {
@@ -98,7 +98,7 @@ function userParts(
         pushText(parts, p.text)
       } else {
         const { record, data } = loaded(input.files, p.fileId)
-        parts.push({ type: 'image', mime: record.mime, data })
+        parts.push({ type: 'image', mime: record.mime, data: data() })
       }
     }
   }

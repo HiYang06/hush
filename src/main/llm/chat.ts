@@ -70,6 +70,7 @@ export type ChatDeps = {
   emit: (messageId: string, event: StreamEvent) => void
   // A session changed without the window asking, e.g. it got its automatic title.
   sessionUpdated: (session: Session) => void
+  checkFile: (file: FileRecord) => void
   readFile: (file: FileRecord) => Buffer
   ensureFile: (file: FileRecord) => Promise<void>
   // A fresh set of web tools for one reply, or null when no search service is set up.
@@ -97,6 +98,7 @@ export function createChat({
   emit,
   sessionUpdated,
   readFile,
+  checkFile,
   ensureFile,
   webTools,
   stream = streamChat
@@ -219,9 +221,13 @@ export function createChat({
     // The search keys are decrypted here.
     const tools = input.webSearch && model.supportsTools ? webTools() : null
     // An attachment missing from disk throws here.
-    const files = new Map<string, LoadedFile>(
-      filesFor(session, newThread, attachments).map((record) => [record.id, { record, data: readFile(record) }])
-    )
+    const files = new Map<string, LoadedFile>()
+    for (const record of filesFor(session, newThread, attachments)) {
+      if (files.has(record.id)) continue
+      checkFile(record)
+      let data: Buffer | undefined
+      files.set(record.id, { record, data: () => (data ??= readFile(record)) })
+    }
     return { model, modelRef: { providerId: model.providerId, modelId: model.id }, conn, tools, files }
   }
 

@@ -1,3 +1,6 @@
+import { mkdtempSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type Database from 'better-sqlite3'
 import { openDb } from '../src/main/db'
@@ -6,6 +9,8 @@ import {
   getFontSize,
   getMiniShortcut,
   getOpenAtLogin,
+  getWebSearch,
+  setWebSearch,
   setFontSize,
   setMiniShortcut,
   setOpenAtLogin
@@ -58,4 +63,19 @@ describe('mini window settings', () => {
     expect(getMiniShortcut(db)).toBe('CommandOrControl+Shift+K')
     expect(getOpenAtLogin(db)).toBe(false)
   })
+})
+
+
+it('keeps web search across database reopenings without queuing it for sync', () => {
+  const path = join(mkdtempSync(join(tmpdir(), 'hush-settings-')), 'hush.db')
+  let db = openDb(path)
+  expect(getWebSearch(db)).toBe(true)
+  setWebSearch(db, false)
+  db.close()
+  db = openDb(path)
+  expect(getWebSearch(db)).toBe(false)
+  setWebSearch(db, true)
+  expect(getWebSearch(db)).toBe(true)
+  expect(db.prepare("SELECT * FROM sync_dirty WHERE tbl = 'settings' AND row_id = 'web_search'").all()).toEqual([])
+  db.close()
 })

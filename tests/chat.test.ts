@@ -1,7 +1,7 @@
-import { mkdtempSync } from 'fs'
+import { mkdtempSync, renameSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { PPTX_MIME } from '@shared/files'
 import type { Attachment, FileRecord, Message, Session, StreamEvent, ThreadAnchor } from '@shared/types'
 import { openDb } from '../src/main/db'
@@ -284,7 +284,7 @@ describe('buildContext', () => {
 function file(id: string, name: string, mime: string, extra: Partial<FileRecord> = {}): LoadedFile {
   return {
     record: { id, sha256: id, name, mime, size: 1, path: id, extracted: null, isScanned: null, createdAt: 0, ...extra },
-    data: Buffer.from(id)
+    data: () => Buffer.from(id)
   }
 }
 
@@ -444,7 +444,8 @@ function setup(
     connection: () => ({ protocol: 'anthropic', baseUrl: 'http://x', apiKey: 'k' }),
     emit: (id, e) => emitted.push([id, e]),
     sessionUpdated: (session) => updated.push(session),
-    readFile: files.read,
+    readFile: (file) => files.read(file),
+    checkFile: files.check,
     ensureFile: async () => {},
     webTools,
     stream: fake.stream
@@ -507,6 +508,7 @@ describe('chat', () => {
       connection: () => ({ protocol: 'anthropic', baseUrl: 'http://x', apiKey: 'k' }),
       emit: () => {},
       sessionUpdated: () => {},
+      checkFile: () => {},
       readFile: () => Buffer.alloc(0),
       ensureFile: async () => {},
       webTools: () => null,
@@ -706,6 +708,7 @@ describe('chat', () => {
       },
       emit: () => {},
       sessionUpdated: () => {},
+      checkFile: () => {},
       readFile: () => Buffer.alloc(0),
       ensureFile: async () => {},
       webTools: () => null
@@ -764,6 +767,46 @@ describe('chat', () => {
     await chat.idle()
     expect(requests[1].tools).toBeUndefined()
     expect(texts(undated(requests[1]))[0][1]).toBe('[文件：la.pdf]\n\n## 第 1 页\n特征值\n特征值的定义\n\n讲讲')
+  })
+
+  it('reads only requested document pages and caches their bytes within one reply', async () => {
+    const { chat, send, requests, files, db, model } = setup(DONE_EVENTS)
+    updateModel(db, model.id, { supportsVision: true })
+    const pages = [1, 2, 3].map((n) => {
+      const image = files.add({ name: `${n}.jpg`, mime: 'image/jpeg', data: Buffer.from(`page${n}`), extracted: null, isScanned: null })
+      return { type: 'page' as const, n, title: '', text: `内容${n}`, tags: ['figure' as const], imageIds: [image.id] }
+    })
+    const pdf = files.add({ name: 'pages.pdf', mime: 'application/pdf', data: Buffer.from('pdf'), extracted: pages, isScanned: false })
+    const read = vi.spyOn(files, 'read')
+    send('讲讲', null, [{ type: 'file', fileId: pdf.id }])
+    await chat.idle()
+    expect(read).not.toHaveBeenCalled()
+    const tools = requests[0].tools!
+    const signal = new AbortController().signal
+    for (let i = 0; i < 2; i++) {
+      const run = tools.run({ id: String(i), name: 'read_document_pages', input: { file: pdf.name, start_page: 2, end_page: 2 } }, signal)
+      let next = await run.next()
+      while (!next.done) next = await run.next()
+      expect(next.value).toMatchObject({ images: [{ data: Buffer.from('page2') }] })
+    }
+    expect(read.mock.calls.map(([f]) => f.id)).toEqual([pages[1].imageIds[0]])
+  })
+
+  it('rejects a missing derived page before sending or replacing a reply', async () => {
+    const { chat, send, regenerate, files, db } = setup(DONE_EVENTS)
+    const image = files.add({ name: 'page.jpg', mime: 'image/jpeg', data: Buffer.from('page'), extracted: null, isScanned: null })
+    const pdf = files.add({ name: 'pages.pdf', mime: 'application/pdf', data: Buffer.from('pdf'), extracted: [
+      { type: 'page', n: 1, title: '', text: '内容', tags: [], imageIds: [image.id] }
+    ], isScanned: false })
+    const first = send('讲讲', null, [{ type: 'file', fileId: pdf.id }])
+    await chat.idle()
+    const before = listMessages(db, first.session.id)
+    renameSync(files.pathOf(image), `${files.pathOf(image)}.missing`)
+    expect(() => regenerate(first.assistantMessage.id)).toThrow()
+    expect(() => send('继续', first.session.id)).toThrow()
+    expect(listMessages(db, first.session.id)).toEqual(before)
+    expect(() => send('新对话', null, [{ type: 'file', fileId: pdf.id }])).toThrow()
+    expect(listSessions(db)).toHaveLength(1)
   })
 
   it('reads attached files from disk and sends them', async () => {
@@ -831,6 +874,7 @@ describe('chat', () => {
     const beforeAnchor = files.add({ name: 'before.txt', mime: 'text/plain', data: Buffer.from('before'), extracted: null, isScanned: null })
     const afterAnchor = files.add({ name: 'after.txt', mime: 'text/plain', data: Buffer.from('after'), extracted: null, isScanned: null })
 
+    const checked: string[] = []
     const ensured: string[] = []
     const read: string[] = []
     const chat = createChat({
@@ -838,6 +882,10 @@ describe('chat', () => {
       connection: () => ({ protocol: 'anthropic', baseUrl: 'http://x', apiKey: 'k' }),
       emit: () => {},
       sessionUpdated: () => {},
+      checkFile: (f) => {
+        checked.push(f.id)
+        files.check(f)
+      },
       readFile: (f) => {
         read.push(f.id)
         return files.read(f)
@@ -872,6 +920,7 @@ describe('chat', () => {
     // New thread: neither fetches nor reads any file from the main session (initial send, follow-up, regenerate).
     ensured.length = 0
     read.length = 0
+    checked.length = 0
     const newThreadInput = sendInput('独立追问', null, [], {
       ...ANCHOR,
       parentSessionId: round1.session.id,
@@ -898,7 +947,7 @@ describe('chat', () => {
     expect(ensured).toEqual([])
     expect(read).toEqual([])
 
-    // Fork thread anchored on round 1: fetches and reads beforeAnchor, but not afterAnchor from round 2.
+    // Fork thread checks only the inherited attachment; extracted text needs no bytes.
     const forkInput = sendInput('带上下文追问', null, [], {
       ...ANCHOR,
       parentSessionId: round1.session.id,
@@ -909,7 +958,8 @@ describe('chat', () => {
     chat.send(forkInput)
     await chat.idle()
     expect(ensured).toEqual([beforeAnchor.id])
-    expect(read).toEqual([beforeAnchor.id])
+    expect(checked).toEqual([beforeAnchor.id])
+    expect(read).toEqual([])
   })
 
   it('regenerate replaces the last reply; marks and threads on it go with it', async () => {
@@ -982,6 +1032,7 @@ describe('chat', () => {
       connection: () => ({ protocol: 'anthropic', baseUrl: 'http://x', apiKey: 'k' }),
       emit: () => {},
       sessionUpdated: (s) => updated.push(s),
+      checkFile: failed.files.check,
       readFile: failed.files.read,
       ensureFile: async () => {},
       webTools: () => null,
@@ -1002,6 +1053,7 @@ describe('chat', () => {
       connection: () => ({ protocol: 'anthropic', baseUrl: '', apiKey: '' }),
       emit: () => {},
       sessionUpdated: () => {},
+      checkFile: () => {},
       readFile: () => Buffer.alloc(0),
       ensureFile: async () => {},
       webTools: () => null

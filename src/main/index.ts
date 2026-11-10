@@ -13,6 +13,7 @@ import { registerIpc } from './ipc'
 import { applyOpenAtLogin, createMini, openedAtLogin } from './miniWindow'
 import { createSyncService } from './sync/service'
 import { createUpdater } from './updater'
+import { closeAfterFlush } from './closeWindow'
 
 // HUSH_SYNC_URL points a dev build at a local server (cd server && npm start).
 const SYNC_URL = process.env.HUSH_SYNC_URL ?? 'https://hush.evildentist.uk'
@@ -167,12 +168,9 @@ function createWindow(db = currentDb): BrowserWindow {
   win.on('maximize', () => win.webContents.send('window:maximized', true))
   win.on('unmaximize', () => win.webContents.send('window:maximized', false))
 
-  // Note edits wait 0.5s in the window before saving, and an unload handler's save may never arrive,
-  // so the close waits for the window to say it's done (app:flushed destroys it).
-  win.on('close', (event) => {
-    if (win.webContents.isCrashed()) return
-    event.preventDefault()
-    win.webContents.send('app:flush', null)
+  closeAfterFlush(win, () => {
+    win.destroy()
+    if (quitting) app.quit()
   })
 
   load(win, 'main')
