@@ -50,7 +50,7 @@ export type SessionTranscript = {
 const usable = (m: Message): boolean =>
   m.role === 'user' || ((m.status === 'done' || m.status === 'stopped') && m.content.trim() !== '')
 
-function turn(m: Message, fileNames: Map<string, string>): string {
+export function turn(m: Message, fileNames: Map<string, string>): string {
   if (m.role === 'assistant') return `回答：${m.content}`
   const parts = m.attachments.map((a) =>
     a.type === 'file' ? `[附件：${fileNames.get(a.fileId) ?? '文件'}]` : expandAttachment(a)

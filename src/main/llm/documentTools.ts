@@ -67,14 +67,14 @@ const K1 = 1.2
 const B = 0.75
 
 export type Hit = { page: DocumentPage; score: number; terms: string[] }
+export type SearchHit<T> = { item: T; score: number; terms: string[] }
 
-// Okapi BM25 over the pages of one document, title included. Built once per document per reply.
-export function createPageIndex(pages: DocumentPage[]): (query: string) => Hit[] {
-  const docs = pages.map((page) => {
+export function createIndex<T>(items: T[], textOf: (item: T) => string): (query: string) => SearchHit<T>[] {
+  const docs = items.map((item) => {
     const tf = new Map<string, number>()
-    const tokens = tokenize(`${page.title}\n${page.text}`)
+    const tokens = tokenize(textOf(item))
     for (const t of tokens) tf.set(t, (tf.get(t) ?? 0) + 1)
-    return { page, tf, length: tokens.length }
+    return { item, tf, length: tokens.length }
   })
   const df = new Map<string, number>()
   for (const d of docs) for (const t of d.tf.keys()) df.set(t, (df.get(t) ?? 0) + 1)
@@ -87,7 +87,7 @@ export function createPageIndex(pages: DocumentPage[]): (query: string) => Hit[]
   return (query) => {
     // Rarest first, so the snippet shows the most telling term.
     const terms = [...new Set(tokenize(query))].sort((a, b) => idf(b) - idf(a))
-    const hits: Hit[] = []
+    const hits: SearchHit<T>[] = []
     for (const d of docs) {
       let score = 0
       const matched: string[] = []
@@ -97,10 +97,19 @@ export function createPageIndex(pages: DocumentPage[]): (query: string) => Hit[]
         matched.push(t)
         score += (idf(t) * f * (K1 + 1)) / (f + K1 * (1 - B + (B * d.length) / avgLength))
       }
-      if (score > 0) hits.push({ page: d.page, score, terms: matched })
+      if (score > 0) hits.push({ item: d.item, score, terms: matched })
     }
-    return hits.sort((a, b) => b.score - a.score || a.page.n - b.page.n).slice(0, MAX_SEARCH_HITS)
+    return hits.sort((a, b) => b.score - a.score)
   }
+}
+
+// Okapi BM25 over the pages of one document, title included. Built once per document per reply.
+export function createPageIndex(pages: DocumentPage[]): (query: string) => Hit[] {
+  const search = createIndex(pages, (page) => `${page.title}\n${page.text}`)
+  return (query) => search(query)
+    .map(({ item, score, terms }) => ({ page: item, score, terms }))
+    .sort((a, b) => b.score - a.score || a.page.n - b.page.n)
+    .slice(0, MAX_SEARCH_HITS)
 }
 
 // The text around the first place the rarest matched term appears.

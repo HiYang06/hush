@@ -12,7 +12,7 @@ import type {
   ThinkingLevel
 } from '@shared/types'
 import { getFiles } from '../db/repo/files'
-import { getProjectPrompt } from '../db/repo/projects'
+import { getProject } from '../db/repo/projects'
 import {
   appendMessage,
   deleteMessages,
@@ -28,6 +28,7 @@ import {
   createThreadSession,
   getGlobalPrompt,
   getSession,
+  listProjectSessionRefs,
   replacePlaceholderTitle,
   touchSession
 } from '../db/repo/sessions'
@@ -35,6 +36,7 @@ import { streamChat } from './adapters'
 import { readsByTool } from '@shared/files'
 import { buildContext, conversationMessages, type LoadedFile } from './context'
 import { createDocumentTools } from './documentTools'
+import { createProjectTools } from './projectTools'
 import { generateTitle, titleQuestion, titleRequest } from './title'
 import type { ChatRequest, Connection, Tools } from './types'
 
@@ -240,6 +242,10 @@ export function createChat({
     title: { question: Message; placeholder: string } | null
   ): void {
     const mainSession = session.kind === 'thread' ? getSession(db, session.parentSessionId) : session
+    const project = mainSession.projectId === null ? null : getProject(db, mainSession.projectId)
+    const projectSessions = model.supportsTools && project?.memoryEnabled
+      ? listProjectSessionRefs(db, project.id, mainSession.id)
+      : []
     const conversation = {
       session,
       messages: listMessages(db, session.id),
@@ -247,7 +253,8 @@ export function createChat({
     }
     const context = buildContext({
       ...conversation,
-      projectPrompt: getProjectPrompt(db, mainSession.projectId),
+      projectPrompt: project?.systemPrompt ?? null,
+      projectSessions,
       globalPrompt: getGlobalPrompt(db),
       model,
       thinking,
@@ -261,6 +268,11 @@ export function createChat({
     const documents = [...documentIds].map((id) => files.get(id)!.record).filter((f) => readsByTool(f, model))
     const allTools = combineTools([
       ...(documents.length > 0 ? [createDocumentTools(documents, files, model.supportsVision)] : []),
+      ...(projectSessions.length > 0 ? [createProjectTools(
+        projectSessions,
+        (id) => listMessages(db, id),
+        (id) => getFiles(db, [id])[0]?.name ?? '文件'
+      )] : []),
       ...(tools ? [tools] : [])
     ])
 

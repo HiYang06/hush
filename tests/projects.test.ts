@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { openDb } from '../src/main/db'
 import { appendMessage, conversationUsage, listMessages, saveReply } from '../src/main/db/repo/messages'
-import { createProject, deleteProject, listProjects, updateProject } from '../src/main/db/repo/projects'
+import { createProject, deleteProject, getProject, listProjects, updateProject } from '../src/main/db/repo/projects'
 import { addModel, createProvider } from '../src/main/db/repo/providers'
 import {
   createMainSession,
@@ -10,6 +10,7 @@ import {
   getGlobalPrompt,
   getSession,
   listSessions,
+  listProjectSessionRefs,
   moveSession,
   renameSession,
   setGlobalPrompt
@@ -39,6 +40,51 @@ function setup() {
 }
 
 describe('projects', () => {
+  it('enables memory by default and preserves the switch across unrelated edits', () => {
+    const { db } = setup()
+    const project = createProject(db, '线代')
+    expect(project.memoryEnabled).toBe(true)
+    expect(updateProject(db, project.id, { memoryEnabled: false }).memoryEnabled).toBe(false)
+    expect(updateProject(db, project.id, { name: '线性代数', systemPrompt: '助教' }).memoryEnabled).toBe(false)
+    expect(getProject(db, project.id).memoryEnabled).toBe(false)
+    expect(listProjects(db)[0].memoryEnabled).toBe(false)
+    expect(db.prepare('SELECT memory_enabled FROM projects WHERE id = ?').pluck().get(project.id)).toBe(0)
+    expect(updateProject(db, project.id, { memoryEnabled: true }).memoryEnabled).toBe(true)
+    expect(listProjects(db)[0].memoryEnabled).toBe(true)
+    expect(db.prepare('SELECT memory_enabled FROM projects WHERE id = ?').pluck().get(project.id)).toBe(1)
+  })
+
+  it('numbers only other main sessions with user messages, ordered by creation time then id', () => {
+    const { db, newSession, ids } = setup()
+    const project = createProject(db, '线代')
+    const otherProject = createProject(db, '物理')
+    const current = newSession(project.id)
+    const earlier = newSession(project.id)
+    const tied = [newSession(project.id), newSession(project.id)].sort((a, b) => a.id.localeCompare(b.id))
+    newSession(project.id)
+    const assistantOnly = newSession(project.id)
+    appendMessage(db, assistantOnly.id, { role: 'assistant', ...ids })
+    for (const s of [current, earlier, ...tied, newSession(otherProject.id), newSession()]) {
+      appendMessage(db, s.id, { role: 'user', content: '问', attachments: [] })
+      db.prepare('UPDATE sessions SET created_at = ? WHERE id = ?').run(s.id === earlier.id ? 1 : 2, s.id)
+    }
+    const anchor = appendMessage(db, earlier.id, { role: 'assistant', ...ids })
+    const thread = createThreadSession(db, {
+      parentSessionId: earlier.id, anchorMessageId: anchor.id, anchorQuote: '答',
+      anchorStart: 0, anchorEnd: 1, anchorPrefix: '', anchorSuffix: '', contextMode: 'fork', title: '追问', ...ids
+    })
+    appendMessage(db, thread.id, { role: 'user', content: '追问', attachments: [] })
+    const refs = listProjectSessionRefs(db, project.id, current.id)
+    expect(refs).toEqual([earlier, ...tied].map((s, i) => ({ n: i + 1, id: s.id, title: s.title, createdAt: i === 0 ? 1 : 2 })))
+    appendMessage(db, earlier.id, { role: 'user', content: '继续', attachments: [] })
+    db.prepare('UPDATE sessions SET updated_at = 999 WHERE id = ?').run(earlier.id)
+    const latest = newSession(project.id)
+    appendMessage(db, latest.id, { role: 'user', content: '新问题', attachments: [] })
+    expect(listProjectSessionRefs(db, project.id, current.id)).toEqual([
+      ...refs, { n: 4, id: latest.id, title: latest.title, createdAt: latest.createdAt }
+    ])
+  })
+
   it('appends new projects to the end of the list', () => {
     const { db } = setup()
     createProject(db, '一')

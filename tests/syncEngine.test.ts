@@ -5,6 +5,7 @@ import type Database from 'better-sqlite3'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { openDb } from '../src/main/db'
 import { listRevisions, saveNote } from '../src/main/db/repo/notes'
+import { createProject, getProject, updateProject } from '../src/main/db/repo/projects'
 import { search } from '../src/main/db/repo/search'
 import { createFileStore, type FileStore } from '../src/main/files/store'
 import { prepareForLogin, syncOnce, type SyncTransport } from '../src/main/sync/engine'
@@ -73,6 +74,27 @@ const global = { scope: 'global', scopeId: 'global' } as const
 const noteOf = (db: Database.Database): string => one(db, "SELECT content FROM notes WHERE id = 'global:global'") as string
 
 describe('sync engine', () => {
+  it('syncs project memory through the server in both directions without dropping the new column', async () => {
+    const a = device()
+    const b = device()
+    const project = createProject(a.db, '线代')
+    await a.sync()
+    await b.sync()
+    expect(getProject(b.db, project.id).memoryEnabled).toBe(true)
+
+    updateProject(a.db, project.id, { memoryEnabled: false })
+    await a.sync()
+    await b.sync()
+    expect(getProject(b.db, project.id).memoryEnabled).toBe(false)
+    expect(dirty(a.db) + dirty(b.db)).toBe(0)
+
+    updateProject(b.db, project.id, { memoryEnabled: true })
+    await b.sync()
+    await a.sync()
+    expect(getProject(a.db, project.id).memoryEnabled).toBe(true)
+    expect(dirty(a.db) + dirty(b.db)).toBe(0)
+  })
+
   it('copies everything to a new device, without the API key, and settles with nothing left to push', async () => {
     const a = device()
     seedSession(a.db)

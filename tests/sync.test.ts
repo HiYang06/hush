@@ -66,6 +66,17 @@ describe('sync tracking (migration 008)', () => {
     expect(dirty(db)).toEqual(['marks/k1', 'messages/m1', 'sessions/s1', 'sessions/t1'])
   })
 
+  it('tracks changes to project memory added after the sync triggers were created', () => {
+    const db = freshDb()
+    db.exec("INSERT INTO projects (id, name, created_at, updated_at) VALUES ('p1', '线代', 0, 0)")
+    db.exec('DELETE FROM sync_dirty')
+    db.prepare("UPDATE projects SET memory_enabled = 0 WHERE id = 'p1'").run()
+    expect(dirty(db)).toEqual(['projects/p1'])
+    db.exec('DELETE FROM sync_dirty; UPDATE sync_state SET applying = 1')
+    db.prepare("UPDATE projects SET memory_enabled = 1 WHERE id = 'p1'").run()
+    expect(dirty(db)).toEqual([])
+  })
+
   it('keeps one entry per row however often it is written, as a streaming reply is', () => {
     const db = freshDb()
     seed(db)

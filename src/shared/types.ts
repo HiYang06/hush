@@ -34,6 +34,8 @@ export type Project = {
   id: string
   name: string
   systemPrompt: string | null
+  // Replies may look through the project's other sessions.
+  memoryEnabled: boolean
   sortOrder: number
   createdAt: number
   updatedAt: number
@@ -130,6 +132,9 @@ export type WebStep =
   | { type: 'read'; url: string }
   | { type: 'doc_search'; file: string; query: string }
   | { type: 'doc_read'; file: string; start: number; end: number }
+  // Project memory: looking through the project's other sessions (D-085).
+  | { type: 'session_search'; query: string }
+  | { type: 'session_read'; title: string; start: number; end: number }
 
 // A source the model may cite as [n]; numbered within one reply, a URL keeps its first number.
 export type WebSource = { n: number; url: string; title: string; date: string | null; snippet: string }
@@ -318,7 +323,7 @@ export type StreamEvent =
       message: string
     }
 
-export type ProjectPatch = Partial<Pick<Project, 'name'>> & { systemPrompt?: string }
+export type ProjectPatch = Partial<Pick<Project, 'name' | 'memoryEnabled'>> & { systemPrompt?: string }
 
 // Where a thread hangs and how it sees the main conversation; fixed once its first message is sent.
 export type ThreadAnchor = Pick<

@@ -6,15 +6,15 @@ import { PPTX_MIME } from '@shared/files'
 import type { Attachment, FileRecord, Message, Session, StreamEvent, ThreadAnchor } from '@shared/types'
 import { openDb } from '../src/main/db'
 import { createMark, listMarks } from '../src/main/db/repo/marks'
-import { getMessage, listConversationMessages, listMessages } from '../src/main/db/repo/messages'
+import { appendMessage, getMessage, listConversationMessages, listMessages, saveReply } from '../src/main/db/repo/messages'
 import { search } from '../src/main/db/repo/search'
 import { createProject, updateProject } from '../src/main/db/repo/projects'
 import { addModel, createProvider, updateModel } from '../src/main/db/repo/providers'
-import { deleteSession, getSession, listSessions, renameSession } from '../src/main/db/repo/sessions'
+import { createMainSession, deleteSession, getSession, listSessions, renameSession } from '../src/main/db/repo/sessions'
 import { createFileStore } from '../src/main/files/store'
 import { createChat, threadTitle } from '../src/main/llm/chat'
 import { cleanTitle, TITLE_PROMPT, titleQuestion } from '../src/main/llm/title'
-import { buildContext, pickSystemPrompt, type LoadedFile } from '../src/main/llm/context'
+import { buildContext, MAX_LISTED_SESSIONS, pickSystemPrompt, projectSessionList, type LoadedFile } from '../src/main/llm/context'
 import type { ChatRequest, Tools } from '../src/main/llm/types'
 
 const noDownload = async (): Promise<Buffer> => {
@@ -117,6 +117,7 @@ describe('buildContext', () => {
   const base = {
     parentMessages: [],
     projectPrompt: null,
+    projectSessions: [],
     globalPrompt: '',
     model: MODEL,
     thinking: 'medium' as const,
@@ -127,6 +128,33 @@ describe('buildContext', () => {
     expect(pickSystemPrompt('项目提示词', '全局')).toBe('项目提示词')
     expect(pickSystemPrompt('  ', '全局')).toBe('全局')
     expect(pickSystemPrompt(null, '')).toBe('')
+  })
+
+  it('appends the project list after the selected prompt, including when there is no prompt', () => {
+    const projectSessions = [{ n: 1, id: 'other', title: '特征值', createdAt: new Date(2026, 10, 3, 23, 30).getTime() }]
+    const input = { ...base, session: MAIN, messages: [], projectSessions }
+    const list = projectSessionList(projectSessions)
+    expect(list).toContain('1. 特征值（2026-11-03）')
+    expect(build(input).system).toBe(list)
+    expect(build({ ...input, globalPrompt: '全局' }).system).toBe(`全局\n\n${list}`)
+    expect(build({ ...input, globalPrompt: '全局', projectPrompt: '项目' }).system).toBe(`项目\n\n${list}`)
+    expect(build({ ...input, projectSessions: [], projectPrompt: '项目' }).system).toBe('项目')
+    expect(projectSessionList([])).toBe('')
+  })
+
+  it('lists the most recent 50 sessions without renumbering them or mutating the input', () => {
+    const sessions = Array.from({ length: MAX_LISTED_SESSIONS + 2 }, (_, i) => ({
+      n: i + 1, id: `s${i + 1}`, title: `会话${i + 1}`, createdAt: new Date(2026, 10, 3).getTime()
+    })).reverse()
+    const before = [...sessions]
+    const list = projectSessionList(sessions)
+    expect(list).toContain('（更早的 2 个会话没有列出，可以检索到）')
+    expect(list).not.toMatch(/^1\.|^2\./m)
+    expect(list.split('\n').slice(2).map((line) => Number(line.split('.')[0]))).toEqual(
+      Array.from({ length: 50 }, (_, i) => i + 3)
+    )
+    expect(sessions).toEqual(before)
+    expect(projectSessionList(sessions.slice(2))).not.toContain('没有列出')
   })
 
   it('sends messages in order, skipping failed and unfinished replies and merging the user turns left behind', () => {
@@ -301,6 +329,7 @@ describe('buildContext with files', () => {
     session: MAIN,
     parentMessages: [],
     projectPrompt: null,
+    projectSessions: [],
     globalPrompt: '',
     thinking: 'medium' as const
   }
@@ -832,6 +861,115 @@ describe('chat', () => {
     await chat.idle()
     expect(session.projectId).toBe(project.id)
     expect(requests[0].system).toBe('你是线性代数助教')
+  })
+
+  it.each([
+    { scenario: 'enabled without web search', inProject: true, enabled: true, supportsTools: true, other: 'same', webSearch: false, active: true },
+    { scenario: 'enabled with web search', inProject: true, enabled: true, supportsTools: true, other: 'same', webSearch: true, active: true },
+    { scenario: 'disabled for the project', inProject: true, enabled: false, supportsTools: true, other: 'same', webSearch: false, active: false },
+    { scenario: 'standalone session', inProject: false, enabled: true, supportsTools: true, other: 'same', webSearch: false, active: false },
+    { scenario: 'no other sessions', inProject: true, enabled: true, supportsTools: true, other: 'none', webSearch: false, active: false },
+    { scenario: 'only an empty session', inProject: true, enabled: true, supportsTools: true, other: 'empty', webSearch: false, active: false },
+    { scenario: 'only another project has history', inProject: true, enabled: true, supportsTools: true, other: 'different', webSearch: false, active: false },
+    { scenario: 'model without tools', inProject: true, enabled: true, supportsTools: false, other: 'same', webSearch: true, active: false }
+  ])('offers the project list and tools together: $scenario', async ({ inProject, enabled, supportsTools, other, webSearch, active }) => {
+    const { db, chat, model, requests } = setup(DONE_EVENTS)
+    const project = createProject(db, '线代')
+    updateProject(db, project.id, { memoryEnabled: enabled, systemPrompt: '助教' })
+    updateModel(db, model.id, { supportsTools })
+    if (other !== 'none') {
+      const previous = createMainSession(db, {
+        title: '特征值分解', projectId: other === 'different' ? createProject(db, '其他').id : project.id,
+        providerId: model.providerId, modelId: model.id
+      })
+      if (other !== 'empty') appendMessage(db, previous.id, { role: 'user', content: '矩阵如何分解', attachments: [] })
+    }
+    chat.send({ sessionId: null, projectId: inProject ? project.id : null, newThread: null, text: '继续', attachments: [], modelId: model.id, thinking: 'off', webSearch })
+    await chat.idle()
+    expect(requests[0].system.includes('[项目会话]')).toBe(active)
+    if (active) {
+      expect(requests[0].system).toContain('助教\n\n[项目会话]')
+      expect(requests[0].system).toContain('1. 特征值分解（')
+      expect(requests[0].tools?.specs.map((s) => s.name)).toEqual(['search_project_sessions', 'read_session'])
+    } else {
+      expect(requests[0].system).toBe(inProject ? '助教' : '')
+      expect(requests[0].tools).toBeUndefined()
+    }
+  })
+
+  it.each(['fork', 'new'] as const)('inherits project memory in a %s thread and excludes its parent main session', async (contextMode) => {
+    const { db, chat, model, send, requests, regenerate } = setup(DONE_EVENTS)
+    const project = createProject(db, '线代')
+    const main = chat.send({ sessionId: null, projectId: project.id, newThread: null, text: '当前问题', attachments: [], modelId: model.id, thinking: 'off', webSearch: false })
+    await chat.idle()
+    renameSession(db, main.session.id, '当前主对话')
+    const previous = createMainSession(db, { title: '历史主对话', projectId: project.id, providerId: model.providerId, modelId: model.id })
+    appendMessage(db, previous.id, { role: 'user', content: '历史问题', attachments: [] })
+    const thread = send('追问', null, [], { ...ANCHOR, parentSessionId: main.session.id, anchorMessageId: main.assistantMessage.id, contextMode })
+    await chat.idle()
+    expect(requests[1].system).toContain('1. 历史主对话（')
+    expect(requests[1].system).not.toContain('当前主对话')
+    expect(requests[1].tools?.specs.map((s) => s.name)).toContain('read_session')
+    updateProject(db, project.id, { memoryEnabled: false })
+    regenerate(thread.assistantMessage.id)
+    await chat.idle()
+    expect(requests[2].system).not.toContain('[项目会话]')
+    expect(requests[2].tools).toBeUndefined()
+  })
+
+  it('lets an adapter search and read another session alongside document and web tools, keeping results out of stored history', async () => {
+    const { db, model, files } = setup(DONE_EVENTS)
+    const project = createProject(db, '线代')
+    const previous = createMainSession(db, { title: '特征值分解', projectId: project.id, providerId: model.providerId, modelId: model.id })
+    const attachment = files.add({ name: '历史讲义.txt', mime: 'text/plain', data: Buffer.from('不应读取附件正文'), extracted: null, isScanned: null })
+    appendMessage(db, previous.id, { role: 'user', content: '什么是特征值', attachments: [{ type: 'file', fileId: attachment.id }] })
+    const answer = appendMessage(db, previous.id, { role: 'assistant', providerId: model.providerId, modelId: model.id })
+    saveReply(db, answer.id, {
+      content: '特征值满足 Av = λv', thinking: null, thinkingMs: null, status: 'done', error: null,
+      errorKind: null, inputTokens: null, outputTokens: null, web: null
+    })
+    const pdf = files.add({ name: '当前讲义.pdf', mime: 'application/pdf', data: Buffer.from('pdf'), extracted: [
+      { type: 'page', n: 1, title: '复习', text: '矩阵', tags: [], imageIds: [] }
+    ], isScanned: false })
+    const results: string[] = []
+    const readFile = vi.fn(files.read)
+    const chat = createChat({
+      db,
+      connection: () => ({ protocol: 'anthropic', baseUrl: 'http://x', apiKey: 'k' }),
+      emit: () => {}, sessionUpdated: () => {}, checkFile: files.check, readFile,
+      ensureFile: async () => {},
+      webTools: () => ({ specs: [{ name: 'search_web', description: '', parameters: { type: 'object', properties: {}, required: [] } }], run: async function* () { return '网页' } }),
+      stream: async function* (_conn, req) {
+        if (req.system === TITLE_PROMPT) { yield* TITLE_REPLY; return }
+        expect(req.tools?.specs.map((s) => s.name)).toEqual([
+          'search_document', 'read_document_pages', 'search_project_sessions', 'read_session', 'search_web'
+        ])
+        expect(JSON.stringify(req.messages)).not.toContain('Av = λv')
+        for (const call of [
+          { id: 'search', name: 'search_project_sessions', input: { query: '特征值' } },
+          { id: 'read', name: 'read_session', input: { session: 1, start_round: 1, end_round: 1 } }
+        ]) {
+          const result = yield* req.tools!.run(call, req.signal)
+          expect(typeof result).toBe('string')
+          results.push(result as string)
+        }
+        yield { type: 'text', delta: '记得了' }
+        yield { type: 'done', usage: { input: 1, output: 1 }, stopReason: 'end_turn' }
+      }
+    })
+    const sent = chat.send({ sessionId: null, projectId: project.id, newThread: null, text: '之前聊过什么', attachments: [{ type: 'file', fileId: pdf.id }], modelId: model.id, thinking: 'off', webSearch: true })
+    await chat.idle()
+    expect(results).toHaveLength(2)
+    expect(results[0]).toContain('特征值')
+    expect(results[1]).toContain('Av = λv')
+    expect(results[1]).toContain('历史讲义.txt')
+    expect(results[1]).not.toContain('不应读取附件正文')
+    expect(readFile).not.toHaveBeenCalled()
+    expect(listMessages(db, sent.session.id).map((m) => m.content)).toEqual(['之前聊过什么', '记得了'])
+    expect(getMessage(db, sent.assistantMessage.id).web?.steps).toEqual([
+      { type: 'session_search', query: '特征值' },
+      { type: 'session_read', title: '特征值分解', start: 1, end: 1 }
+    ])
   })
 
   it('starts a fork thread on its first message, with the main conversation up to the anchor and the prefix', async () => {

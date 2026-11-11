@@ -44,3 +44,7 @@ export type ChatRequest = {
   tools?: Tools
   signal: AbortSignal
 }
+
+// Another main session of the same project, as the model refers to it. n is its rank among them by
+// creation time, from 1, so a new session never renumbers the earlier ones.
+export type ProjectSessionRef = { n: number; id: string; title: string; createdAt: number }

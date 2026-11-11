@@ -2,17 +2,23 @@ import { randomUUID } from 'crypto'
 import type Database from 'better-sqlite3'
 import type { Project, ProjectPatch } from '@shared/types'
 
-const PROJECT_COLUMNS = `id, name, system_prompt AS systemPrompt, sort_order AS sortOrder,
+const PROJECT_COLUMNS = `id, name, system_prompt AS systemPrompt, memory_enabled AS memoryEnabled, sort_order AS sortOrder,
   created_at AS createdAt, updated_at AS updatedAt`
 
+function toProject(row: Record<string, unknown>): Project {
+  return { ...row, memoryEnabled: row.memoryEnabled === 1 } as Project
+}
+
 export function listProjects(db: Database.Database): Project[] {
-  return db.prepare(`SELECT ${PROJECT_COLUMNS} FROM projects ORDER BY sort_order, created_at`).all() as Project[]
+  return (
+    db.prepare(`SELECT ${PROJECT_COLUMNS} FROM projects ORDER BY sort_order, created_at`).all() as Record<string, unknown>[]
+  ).map(toProject)
 }
 
 export function getProject(db: Database.Database, id: string): Project {
   const row = db.prepare(`SELECT ${PROJECT_COLUMNS} FROM projects WHERE id = ?`).get(id)
   if (!row) throw new Error(`Project ${id} not found`)
-  return row as Project
+  return toProject(row as Record<string, unknown>)
 }
 
 // New projects go to the end of the list.
@@ -31,9 +37,10 @@ export function updateProject(db: Database.Database, id: string, patch: ProjectP
   // An empty prompt is stored as NULL, which means "use the global prompt" (D-019).
   const systemPrompt =
     patch.systemPrompt === undefined ? current.systemPrompt : patch.systemPrompt.trim() || null
-  db.prepare('UPDATE projects SET name = ?, system_prompt = ?, updated_at = ? WHERE id = ?').run(
+  db.prepare('UPDATE projects SET name = ?, system_prompt = ?, memory_enabled = ?, updated_at = ? WHERE id = ?').run(
     patch.name ?? current.name,
     systemPrompt,
+    Number(patch.memoryEnabled ?? current.memoryEnabled),
     Date.now(),
     id
   )
@@ -47,10 +54,4 @@ export function deleteProject(db: Database.Database, id: string): void {
     db.prepare("DELETE FROM notes WHERE scope = 'project' AND scope_id = ?").run(id)
     db.prepare('DELETE FROM projects WHERE id = ?').run(id)
   })()
-}
-
-export function getProjectPrompt(db: Database.Database, projectId: string | null): string | null {
-  if (projectId === null) return null
-  return (db.prepare('SELECT system_prompt FROM projects WHERE id = ?').pluck().get(projectId) ??
-    null) as string | null
 }

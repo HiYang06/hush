@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3'
-import { mkdtempSync, readFileSync } from 'fs'
+import { mkdtempSync, readdirSync, readFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { describe, expect, it } from 'vitest'
@@ -31,7 +31,7 @@ function searchMessages(db: ReturnType<typeof openDb>, query: string): string[] 
 describe('openDb', () => {
   it('applies all migrations and seeds mark categories', () => {
     const db = openDb(':memory:')
-    expect(db.pragma('user_version', { simple: true })).toBe(10)
+    expect(db.pragma('user_version', { simple: true })).toBe(11)
     expect(db.pragma('foreign_keys', { simple: true })).toBe(1)
     expect(listMarkCategories(db)).toEqual([
       { id: 'cat-knowledge', name: '知识点', color: 'amber', sortOrder: 1 },
@@ -64,7 +64,7 @@ describe('openDb', () => {
     old.close()
 
     const db = openDb(file)
-    expect(db.pragma('user_version', { simple: true })).toBe(10)
+    expect(db.pragma('user_version', { simple: true })).toBe(11)
     const found = search(db, '特征值')
     expect(found.messages.map((m) => m.snippet)).toEqual(['矩阵的特征值分解'])
     expect(found.notes.map((n) => n.snippet)).toEqual(['特征值'])
@@ -82,6 +82,20 @@ describe('openDb', () => {
     expect(search(first, '特征值').messages).toHaveLength(0)
     first.close()
     expect(search(openDb(file), '特征值').messages).toHaveLength(1)
+  })
+
+  it('enables project memory for existing projects when upgrading version 10', () => {
+    const file = join(mkdtempSync(join(tmpdir(), 'hush-')), 'hush.db')
+    const old = new Database(file)
+    const dir = join(__dirname, '../src/main/db/migrations')
+    for (const name of readdirSync(dir).sort().slice(0, 10)) old.exec(readFileSync(join(dir, name), 'utf8'))
+    old.pragma('user_version = 10')
+    old.exec("INSERT INTO projects (id, name, created_at, updated_at) VALUES ('p1', '线代', 0, 0)")
+    old.close()
+
+    const db = openDb(file)
+    expect(db.prepare("SELECT name, memory_enabled FROM projects WHERE id = 'p1'").get()).toEqual({ name: '线代', memory_enabled: 1 })
+    expect(db.pragma('foreign_key_check')).toEqual([])
   })
 
   it('refuses a database newer than the app', () => {

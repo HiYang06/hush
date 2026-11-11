@@ -2,7 +2,7 @@
 import { planFile } from '@shared/files'
 import { effectiveThinkingLevel } from '@shared/thinking'
 import type { Attachment, FileRecord, Message, Model, Session, ThinkingLevel } from '@shared/types'
-import type { ChatMessage, ChatRequest, ContentPart } from './types'
+import type { ChatMessage, ChatRequest, ContentPart, ProjectSessionRef } from './types'
 
 export type ContextInput = {
   session: Session
@@ -12,6 +12,7 @@ export type ContextInput = {
   parentMessages: Message[]
   // The project prompt of the main session this conversation belongs to.
   projectPrompt: string | null
+  projectSessions: ProjectSessionRef[]
   globalPrompt: string
   model: Pick<
     Model,
@@ -80,6 +81,19 @@ export function messageDate(createdAt: number): string {
   const d = new Date(createdAt)
   const pad = (n: number): string => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} 周${WEEKDAYS[d.getDay()]}`
+}
+
+export const MAX_LISTED_SESSIONS = 50
+
+export function projectSessionList(sessions: ProjectSessionRef[]): string {
+  if (sessions.length === 0) return ''
+  const listed = [...sessions].sort((a, b) => a.n - b.n).slice(-MAX_LISTED_SESSIONS)
+  const omitted = sessions.length - listed.length
+  return [
+    '[项目会话] 这个 project 里的其他会话。需要用到之前聊过的内容时，用 search_project_sessions 检索、read_session 阅读：',
+    ...(omitted > 0 ? [`（更早的 ${omitted} 个会话没有列出，可以检索到）`] : []),
+    ...listed.map((s) => `${s.n}. ${s.title}（${messageDate(s.createdAt).split(' ')[0]}）`)
+  ].join('\n')
 }
 
 function userParts(
@@ -171,7 +185,8 @@ export function buildContext(input: ContextInput): Omit<ChatRequest, 'signal'> {
 
   return {
     model: input.model.modelName,
-    system: pickSystemPrompt(input.projectPrompt, input.globalPrompt),
+    system: [pickSystemPrompt(input.projectPrompt, input.globalPrompt), projectSessionList(input.projectSessions)]
+      .filter(Boolean).join('\n\n'),
     messages,
     thinking: input.model.supportsThinking ? effectiveThinkingLevel(input.model, input.thinking) : null,
     maxOutputTokens: input.model.maxOutputTokens

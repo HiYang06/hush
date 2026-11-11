@@ -1,0 +1,1 @@
+ALTER TABLE projects ADD COLUMN memory_enabled INTEGER NOT NULL DEFAULT 1;

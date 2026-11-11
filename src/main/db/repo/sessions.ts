@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto'
 import type Database from 'better-sqlite3'
 import type { Session, ThreadAnchor } from '@shared/types'
+import type { ProjectSessionRef } from '../../llm/types'
 import { mergeSessionNote } from './notes'
 
 const SESSION_COLUMNS = `id, kind, project_id AS projectId, parent_session_id AS parentSessionId,
@@ -13,6 +14,20 @@ export function listSessions(db: Database.Database): Session[] {
   return db
     .prepare(`SELECT ${SESSION_COLUMNS} FROM sessions ORDER BY updated_at DESC`)
     .all() as Session[]
+}
+
+export function listProjectSessionRefs(
+  db: Database.Database,
+  projectId: string,
+  exceptSessionId: string
+): ProjectSessionRef[] {
+  return db.prepare(
+    `SELECT ROW_NUMBER() OVER (ORDER BY created_at, id) AS n, id, title, created_at AS createdAt
+     FROM sessions
+     WHERE project_id = ? AND kind = 'main' AND id <> ?
+       AND EXISTS (SELECT 1 FROM messages WHERE session_id = sessions.id AND role = 'user')
+     ORDER BY created_at, id`
+  ).all(projectId, exceptSessionId) as ProjectSessionRef[]
 }
 
 export function getSession(db: Database.Database, id: string): Session {

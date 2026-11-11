@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import type { Project } from '@shared/types'
 import { ChevronRightIcon } from '@renderer/components/common/Icons'
 import { useAppStore } from '@renderer/stores/appStore'
-import { Group } from './SettingsView'
+import { Check, Group, Row } from './SettingsView'
 
 // Takes over the whole window like the provider settings: one project's name and prompt at a time.
 export const ProjectSettingsView: React.FC = () => {
@@ -99,6 +99,18 @@ const ProjectDetail: React.FC<{ project: Project; sessionCount: number }> = ({ p
       <p className="settings-muted project-prompt-hint">
         填了就完全代替全局提示词，不会和它拼在一起。
       </p>
+
+      <Group title="项目记忆">
+        <Row label="其他会话">
+          <Check
+            checked={project.memoryEnabled}
+            label="回答时可以查阅这个 project 里的其他会话"
+            onChange={(memoryEnabled) => {
+              void updateProject(project.id, { memoryEnabled })
+            }}
+          />
+        </Row>
+      </Group>
 
       <div className="settings-danger">
         <button

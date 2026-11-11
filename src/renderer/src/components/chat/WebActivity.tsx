@@ -19,6 +19,10 @@ function stepText(step: WebStep): string {
       return `检索《${step.file}》：${step.query}`
     case 'doc_read':
       return `翻阅《${step.file}》第 ${step.start === step.end ? step.start : `${step.start}–${step.end}`} 页`
+    case 'session_search':
+      return `检索项目会话：${step.query}`
+    case 'session_read':
+      return `查阅《${step.title}》第 ${step.start === step.end ? step.start : `${step.start}–${step.end}`} 轮`
   }
 }
 
@@ -26,8 +30,8 @@ function count(steps: WebStep[], type: WebStep['type']): number {
   return steps.filter((s) => s.type === type).length
 }
 
-// What a reply looked up, online or in attached documents: the current step while it works, then one
-// line that opens to the list.
+// What a reply looked up, online, in attached documents or in the project's other sessions: the current
+// step while it works, then one line that opens to the list.
 export const WebActivity: React.FC<{ web: WebActivityData; busy: boolean }> = ({ web, busy }) => {
   const [expanded, setExpanded] = useState(false)
   const last = web.steps[web.steps.length - 1]
@@ -44,11 +48,13 @@ export const WebActivity: React.FC<{ web: WebActivityData; busy: boolean }> = ({
   const reads = count(web.steps, 'read')
   const docSearches = count(web.steps, 'doc_search')
   const docPages = web.steps.reduce((n, s) => (s.type === 'doc_read' ? n + s.end - s.start + 1 : n), 0)
+  const sessionLookups = count(web.steps, 'session_search') + count(web.steps, 'session_read')
   const summary = [
     searches > 0 && `搜索 ${searches} 次`,
     reads > 0 && `读了 ${reads} 个网页`,
     docSearches > 0 && `检索文档 ${docSearches} 次`,
     docPages > 0 && `翻阅 ${docPages} 页`,
+    sessionLookups > 0 && `查阅会话 ${sessionLookups} 次`,
     (searches > 0 || reads > 0) && `${web.sources.length} 个来源`
   ]
     .filter(Boolean)
