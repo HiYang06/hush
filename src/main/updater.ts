@@ -40,15 +40,27 @@ export type Updater = {
   install: () => void
 }
 
-// Positive when a is newer. Release tags are plain x.y.z (with an optional leading v).
+// Positive when a is newer. Release tags are x.y.z or x.y.z-beta.n (with an optional leading v); a beta
+// is older than the release it leads to, so someone on 0.2.0-beta.1 is offered 0.2.0.
 export function compareVersions(a: string, b: string): number {
-  const parts = (v: string): number[] => v.replace(/^v/, '').split('.').map((n) => parseInt(n, 10) || 0)
-  const [pa, pb] = [parts(a), parts(b)]
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const d = (pa[i] ?? 0) - (pb[i] ?? 0)
-    if (d !== 0) return d
+  const parse = (v: string): { main: number[]; beta: number[] | null } => {
+    const [main, beta] = v.replace(/^v/, '').split('-')
+    const numbers = (s: string): number[] => s.split('.').map((n) => parseInt(n, 10) || 0)
+    return { main: numbers(main), beta: beta === undefined ? null : numbers(beta.replace(/^\D+/, '')) }
   }
-  return 0
+  const byParts = (x: number[], y: number[]): number => {
+    for (let i = 0; i < Math.max(x.length, y.length); i++) {
+      const d = (x[i] ?? 0) - (y[i] ?? 0)
+      if (d !== 0) return d
+    }
+    return 0
+  }
+  const [pa, pb] = [parse(a), parse(b)]
+  const d = byParts(pa.main, pb.main)
+  if (d !== 0 || (!pa.beta && !pb.beta)) return d
+  if (!pa.beta) return 1
+  if (!pb.beta) return -1
+  return byParts(pa.beta, pb.beta)
 }
 
 // Names come from electron-builder.yml: mac's zip keeps the default name, nsis sets Hush-<version>-setup.exe.

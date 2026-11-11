@@ -70,6 +70,14 @@ describe('compareVersions', () => {
     expect(compareVersions('v1.2.3', '1.2.3')).toBe(0)
     expect(compareVersions('1.2', '1.2.1')).toBeLessThan(0)
   })
+
+  it('puts a beta before its release and after the release before it', () => {
+    expect(compareVersions('0.2.0', '0.2.0-beta.1')).toBeGreaterThan(0)
+    expect(compareVersions('0.2.0-beta.1', '0.1.9')).toBeGreaterThan(0)
+    expect(compareVersions('v0.2.0-beta.2', '0.2.0-beta.1')).toBeGreaterThan(0)
+    expect(compareVersions('0.2.0-beta.10', '0.2.0-beta.9')).toBeGreaterThan(0)
+    expect(compareVersions('0.2.0-beta.1', '0.2.0-beta.1')).toBe(0)
+  })
 })
 
 describe('pickAsset', () => {

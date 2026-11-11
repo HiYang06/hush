@@ -1,16 +1,20 @@
 #!/bin/bash
-# Usage: npm run release -- 0.2.0
+# Usage: npm run release -- 0.2.0        (or 0.2.0-beta.1 for a beta)
 # Bumps the version, checks, builds both platforms, then (after asking) commits, pushes and publishes the
 # GitHub release. The in-app updater finds new versions through that release, and needs all three files.
+# A beta is published as a GitHub prerelease: the updater asks for the latest release, which never is one,
+# so installed apps aren't offered it.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 VERSION=${1:-}
-if [[ ! $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  echo "用法：npm run release -- <x.y.z>（当前版本 $(node -p 'require("./package.json").version')）" >&2
+if [[ ! $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$ ]]; then
+  echo "用法：npm run release -- <x.y.z 或 x.y.z-beta.n>（当前版本 $(node -p 'require("./package.json").version')）" >&2
   exit 1
 fi
 TAG="v$VERSION"
+PRERELEASE=()
+[[ $VERSION == *-beta.* ]] && PRERELEASE=(--prerelease)
 
 [[ $(git branch --show-current) == main ]] || { echo "请在 main 分支上发版" >&2; exit 1; }
 [[ -z $(git status --porcelain) ]] || { echo "有没提交的改动，先提交或暂存" >&2; exit 1; }
@@ -59,4 +63,4 @@ NOTES="## 下载
 
 $CHANGES
 "
-gh release create "$TAG" --target main --title "Hush $VERSION" --notes "$NOTES" "${FILES[@]}"
+gh release create "$TAG" --target main --title "Hush $VERSION" --notes "$NOTES" ${PRERELEASE[@]+"${PRERELEASE[@]}"} "${FILES[@]}"
