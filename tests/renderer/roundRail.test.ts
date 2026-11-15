@@ -6,7 +6,7 @@ function message(id: string, role: Message['role'], content: string): Message {
   return {
     id, role, content, sessionId: 's', seq: 0, thinking: null, thinkingMs: null,
     attachments: [], status: 'done', error: null, errorKind: null, providerId: null,
-    modelId: null, inputTokens: null, outputTokens: null, web: null, createdAt: 0
+    modelId: null, inputTokens: null, outputTokens: null, contextTokens: null, web: null, createdAt: 0
   }
 }
 

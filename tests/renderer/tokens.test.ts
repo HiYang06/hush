@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { estimateTokens, formatTokens, parseTokens } from '../../src/renderer/src/lib/tokens'
+import { estimateTokens } from '../../src/shared/tokens'
+import { formatTokens, parseTokens } from '../../src/renderer/src/lib/tokens'
 
 describe('formatTokens', () => {
   it.each([

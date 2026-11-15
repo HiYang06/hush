@@ -10,6 +10,10 @@ export type ContextInput = {
   messages: Message[]
   // For a thread: its main session's messages. Empty for a main session.
   parentMessages: Message[]
+  // For a thread: its main session, whose compaction a fork thread may start from. Null for a main session.
+  parentSession: Session | null
+  // Build only up to and including this message (a compaction request). Absent: the whole conversation.
+  through?: string
   // The project prompt of the main session this conversation belongs to.
   projectPrompt: string | null
   projectSessions: ProjectSessionRef[]
@@ -148,15 +152,73 @@ export function conversationMessages(input: Pick<ContextInput, 'session' | 'mess
   return [...history, ...own].filter(usable)
 }
 
+type Conversation = Pick<ContextInput, 'session' | 'messages' | 'parentMessages' | 'parentSession'>
+
+// The compaction the model starts from: the session's own, else, for a fork thread, its main session's when that
+// one ends at or before the anchor (a later one summarizes replies the thread never saw). throughIndex is the
+// boundary's place in conversationMessages; null when the boundary message is gone (deleted on another device).
+export type ActiveCompaction = { summary: string; throughIndex: number; compactedAt: number }
+
+export function activeCompaction(input: Conversation): ActiveCompaction | null {
+  const { session, parentSession } = input
+  const conversation = conversationMessages(input)
+  const at = (summary: string, id: string, compactedAt: number | null): ActiveCompaction | null => {
+    const throughIndex = conversation.findIndex((m) => m.id === id)
+    return throughIndex === -1 ? null : { summary, throughIndex, compactedAt: compactedAt ?? 0 }
+  }
+  if (session.compactSummary !== null && session.compactThroughId !== null) {
+    return at(session.compactSummary, session.compactThroughId, session.compactedAt)
+  }
+  if (session.kind !== 'thread' || session.contextMode !== 'fork' || parentSession === null) return null
+  if (parentSession.compactSummary === null || parentSession.compactThroughId === null) return null
+  const boundary = input.parentMessages.find((m) => m.id === parentSession.compactThroughId)
+  const anchor = input.parentMessages.find((m) => m.id === session.anchorMessageId)
+  if (!boundary || !anchor || boundary.seq > anchor.seq) return null
+  return at(parentSession.compactSummary, boundary.id, parentSession.compactedAt)
+}
+
+// What stands in for the compacted messages: the summary, then every file they attached, as it was sent then
+// (a PDF stays readable page by page). Changes only when the conversation is compacted again, so it stays cached.
+function compactedParts(summary: string, compacted: Message[], input: ContextInput): ContentPart[] {
+  const parts: ContentPart[] = [{ type: 'text', text: `[前面对话的摘要]\n${summary}` }]
+  const fileIds = [
+    ...new Set(compacted.flatMap((m) => m.attachments.flatMap((a) => (a.type === 'file' ? [a.fileId] : []))))
+  ]
+  if (fileIds.length > 0) pushText(parts, '[前面对话里附过的文件]')
+  for (const id of fileIds) {
+    for (const p of planFile(loaded(input.files, id).record, input.model).parts) {
+      if (p.type === 'text') {
+        pushText(parts, p.text)
+      } else {
+        const { record, data } = loaded(input.files, p.fileId)
+        parts.push({ type: 'image', mime: record.mime, data: data() })
+      }
+    }
+  }
+  return parts
+}
+
 export function buildContext(input: ContextInput): Omit<ChatRequest, 'signal'> {
   const { session } = input
   const firstUserId = [...input.messages].sort((a, b) => a.seq - b.seq).find((m) => m.role === 'user')?.id
   const prefix = threadPrefix(session)
 
+  let conversation = conversationMessages(input)
+  if (input.through !== undefined) {
+    conversation = conversation.slice(0, conversation.findIndex((m) => m.id === input.through) + 1)
+  }
+  const compaction = activeCompaction(input)
   const messages: ChatMessage[] = []
+  if (compaction) {
+    messages.push({
+      role: 'user',
+      content: compactedParts(compaction.summary, conversation.slice(0, compaction.throughIndex + 1), input)
+    })
+    conversation = conversation.slice(compaction.throughIndex + 1)
+  }
   // A user message is dated only when its day differs from the previous one's.
   let lastDate: string | null = null
-  for (const m of conversationMessages(input)) {
+  for (const m of conversation) {
     let date: string | null = null
     if (m.role === 'user') {
       date = messageDate(m.createdAt)

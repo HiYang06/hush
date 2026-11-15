@@ -5,6 +5,7 @@ import { join } from 'path'
 import { describe, expect, it } from 'vitest'
 import { openDb } from '../src/main/db'
 import { listRevisions, replaceNote, saveNote } from '../src/main/db/repo/notes'
+import { deleteSession, getSession, setCompaction } from '../src/main/db/repo/sessions'
 
 const dirty = (db: Database.Database): string[] =>
   (db.prepare('SELECT tbl, row_id FROM sync_dirty ORDER BY tbl, row_id').all() as { tbl: string; row_id: string }[]).map(
@@ -105,5 +106,24 @@ describe('sync tracking (migration 008)', () => {
     replaceNote(db, target, '二', 'sync_conflict')
     expect(db.prepare('SELECT id FROM notes').pluck().all()).toEqual(['project:p1'])
     expect(listRevisions(db, target).map((r) => [r.content, r.reason])).toEqual([['一', 'sync_conflict']])
+  })
+})
+
+describe('setCompaction (migration 012)', () => {
+  it('writes the three columns without moving the session in its time group, and queues it for pushing', () => {
+    const db = freshDb()
+    seed(db)
+    db.exec('DELETE FROM sync_dirty')
+    const session = setCompaction(db, 's1', { summary: '摘要', throughMessageId: 'm1', compactedAt: 5 })
+    expect(session).toMatchObject({ compactSummary: '摘要', compactThroughId: 'm1', compactedAt: 5, updatedAt: 0 })
+    expect(getSession(db, 's1')).toMatchObject({ compactSummary: '摘要', compactThroughId: 'm1', compactedAt: 5 })
+    expect(dirty(db)).toEqual(['sessions/s1'])
+  })
+
+  it('returns null for a session deleted while its compaction ran', () => {
+    const db = freshDb()
+    seed(db)
+    deleteSession(db, 's1')
+    expect(setCompaction(db, 's1', { summary: '摘要', throughMessageId: 'm1', compactedAt: 5 })).toBeNull()
   })
 })

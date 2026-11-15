@@ -18,3 +18,10 @@ export function streamChat(conn: Connection, req: ChatRequest): AsyncGenerator<S
       return streamGemini(conn, req)
   }
 }
+
+// How each protocol says the output hit its cap: Anthropic, OpenAI Chat, Gemini, OpenAI Responses.
+const TRUNCATED = new Set(['max_tokens', 'length', 'MAX_TOKENS', 'max_output_tokens'])
+
+export function isTruncated(stopReason: string): boolean {
+  return TRUNCATED.has(stopReason)
+}

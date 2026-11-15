@@ -5,8 +5,12 @@ import type {
   ChatRegenerateResult,
   ChatSendInput,
   ChatSendResult,
+  CompactResult,
+  CompactState,
+  ContextUsage,
   FileRecord,
   Message,
+  Model,
   Session,
   StreamEvent,
   ThinkingLevel
@@ -16,6 +20,7 @@ import { getProject } from '../db/repo/projects'
 import {
   appendMessage,
   deleteMessages,
+  findMessage,
   getMessage,
   listMessages,
   saveReply,
@@ -30,11 +35,14 @@ import {
   getSession,
   listProjectSessionRefs,
   replacePlaceholderTitle,
+  setCompaction,
   touchSession
 } from '../db/repo/sessions'
-import { streamChat } from './adapters'
+import { isTruncated, streamChat } from './adapters'
 import { readsByTool } from '@shared/files'
-import { buildContext, conversationMessages, type LoadedFile } from './context'
+import { shouldAutoCompact } from '@shared/compact'
+import { compactLimit, compactRequest, contextUsage, nothingToCompact, planCompaction, SUMMARY_MAX_OUTPUT } from './compact'
+import { activeCompaction, buildContext, conversationMessages, type ContextInput, type LoadedFile } from './context'
 import { createDocumentTools } from './documentTools'
 import { createProjectTools } from './projectTools'
 import { generateTitle, titleQuestion, titleRequest } from './title'
@@ -72,6 +80,7 @@ export type ChatDeps = {
   emit: (messageId: string, event: StreamEvent) => void
   // A session changed without the window asking, e.g. it got its automatic title.
   sessionUpdated: (session: Session) => void
+  compactState: (sessionId: string, state: CompactState | null) => void
   checkFile: (file: FileRecord) => void
   readFile: (file: FileRecord) => Buffer
   ensureFile: (file: FileRecord) => Promise<void>
@@ -87,7 +96,12 @@ export type Chat = {
   send: (input: ChatSendInput) => ChatSendResult
   regenerate: (input: ChatRegenerateInput) => ChatRegenerateResult
   stop: (messageId: string) => void
-  // Resolves when every reply in flight has finished; for tests and quitting.
+  // Summarizes the older part of the conversation in the background; replies can go on meanwhile (D-087). Called
+  // again while one runs, returns that one.
+  compact: (sessionId: string) => Promise<CompactResult>
+  // For the model picked in the input box, which may not be the one the session last used.
+  contextUsage: (sessionId: string, modelId: string) => ContextUsage
+  // Resolves when every reply and compaction in flight has finished; for tests.
   idle: () => Promise<void>
   // Replies still streaming as they are now, not as last saved (up to 0.5s behind): a window that opens one
   // mid-reply, e.g. the main window from the mini window, appends the deltas still to come to this text.
@@ -99,6 +113,7 @@ export function createChat({
   connection,
   emit,
   sessionUpdated,
+  compactState,
   readFile,
   checkFile,
   ensureFile,
@@ -109,6 +124,7 @@ export function createChat({
   // One entry per reply being generated; a main session and its threads can stream at the same time.
   const running = new Map<string, { controller: AbortController; done: Promise<void> }>()
   const live = new Map<string, ReplyProgress>()
+  const compacting = new Map<string, Promise<CompactResult>>()
 
   // The files a reply in this session can send: attached ones (the session's, the inherited parent
   // messages' for a fork thread, and the new message's) and the files derived from them (resized
@@ -153,6 +169,7 @@ export function createChat({
       errorKind: null,
       inputTokens: null,
       outputTokens: null,
+      contextTokens: null,
       web: null
     }
     let thinkingStartedAt: number | null = null
@@ -186,6 +203,7 @@ export function createChat({
             reply.status = 'done'
             reply.inputTokens = event.usage.input
             reply.outputTokens = event.usage.output
+            reply.contextTokens = event.usage.context
             break
           case 'error':
             reply.status = 'error'
@@ -233,6 +251,115 @@ export function createChat({
     return { model, modelRef: { providerId: model.providerId, modelId: model.id }, conn, tools, files }
   }
 
+  function contextInputFor(
+    session: Session,
+    model: ReturnType<typeof getModel>,
+    thinking: ThinkingLevel,
+    files: Map<string, LoadedFile>
+  ): ContextInput {
+    const mainSession = session.kind === 'thread' ? getSession(db, session.parentSessionId) : session
+    const project = mainSession.projectId === null ? null : getProject(db, mainSession.projectId)
+    return {
+      session,
+      messages: listMessages(db, session.id),
+      parentMessages: session.kind === 'thread' ? listMessages(db, mainSession.id) : [],
+      parentSession: session.kind === 'thread' ? mainSession : null,
+      projectPrompt: project?.systemPrompt ?? null,
+      projectSessions: model.supportsTools && project?.memoryEnabled
+        ? listProjectSessionRefs(db, project.id, mainSession.id)
+        : [],
+      globalPrompt: getGlobalPrompt(db),
+      model,
+      thinking,
+      files
+    }
+  }
+
+  // Read afresh: a compaction or another round may have landed since the caller loaded the session. The estimate
+  // counts an image without its bytes, so a file not downloaded to this device yet doesn't matter here.
+  function usageNow(sessionId: string, model: Model): ContextUsage {
+    const session = getSession(db, sessionId)
+    const files = new Map(filesFor(session, null, []).map((record) => [record.id, { record, data: () => Buffer.alloc(0) }]))
+    const input = contextInputFor(session, model, 'off', files)
+    // compressible must agree with compact(), which runs on session.modelId rather than the composer's pick.
+    const compactModel = session.modelId === null ? null : getModel(db, session.modelId)
+    const plan = compactModel
+      ? planCompaction(contextInputFor(session, compactModel, 'off', files), compactLimit(compactModel))
+      : nothingToCompact('model_deleted')
+    return contextUsage(
+      conversationMessages(input),
+      activeCompaction(input),
+      buildContext(input),
+      model.contextWindow,
+      plan
+    )
+  }
+
+  // The summary's text, or the provider's error; nothing is written until the whole summary is in.
+  async function summarize(conn: Connection, req: ChatRequest): Promise<{ text: string } | { error: string }> {
+    let text = ''
+    for await (const event of stream(conn, req)) {
+      if (event.type === 'text') text += event.delta
+      if (event.type === 'error') return { error: event.message }
+      // A summary cut off at the output cap would silently lose whatever it didn't reach.
+      if (event.type === 'done' && isTruncated(event.stopReason)) {
+        // Only a model whose own cap is below the summary's can be helped by raising it; otherwise the model
+        // simply wrote too much this time, and a retry usually comes out shorter.
+        return req.maxOutputTokens! < SUMMARY_MAX_OUTPUT
+          ? { error: '摘要超过了模型的最大输出，没有保存。可以在设置里调大这个模型的最大输出。' }
+          : { error: '摘要写得太长，超过了上限，没有保存。可以再试一次。' }
+      }
+    }
+    return text.trim() ? { text: text.trim() } : { error: '模型没有返回摘要' }
+  }
+
+  // Repeats while the context is still past the trigger: a request that can't hold everything summarizes the
+  // oldest part first. The session's model does it, so its cache from the conversation is reused.
+  async function runCompaction(sessionId: string): Promise<CompactResult> {
+    let compacted: Session | null = null
+    // A failure on a follow-up pass keeps the summary an earlier pass saved, and still says what went wrong.
+    const fail = (error: string): CompactResult => (compacted ? { ok: true, session: compacted, error } : { ok: false, error })
+    for (;;) {
+      try {
+        // Loaded again each pass: rounds sent meanwhile may have brought new attachments.
+        const session = getSession(db, sessionId)
+        if (session.modelId === null) return fail('这个会话用的模型已被删除')
+        await Promise.all(filesFor(session, null, []).map(ensureFile))
+        const { model, conn, files } = prepare({ modelId: session.modelId, webSearch: false }, session, null, [])
+        const input = contextInputFor(session, model, 'off', files)
+        const { throughId } = planCompaction(input, compactLimit(model))
+        if (throughId === null) {
+          return compacted ? { ok: true, session: compacted } : { ok: false, error: 'nothing' }
+        }
+        const signal = new AbortController().signal
+        const result = await summarize(conn, { ...compactRequest(buildContext({ ...input, through: throughId }), model), signal })
+        if ('error' in result) return fail(result.error)
+        const saved = setCompaction(db, sessionId, { summary: result.text, throughMessageId: throughId, compactedAt: Date.now() })
+        if (!saved) return { ok: false, error: 'deleted' }
+        compacted = saved
+        sessionUpdated(compacted)
+        // Checked before the next pass loads anything, so a failure there can't undo a compaction that was enough.
+        if (!shouldAutoCompact(usageNow(sessionId, model))) return { ok: true, session: compacted }
+      } catch (e) {
+        return fail(e instanceof Error ? e.message : String(e))
+      }
+    }
+  }
+
+  function compact(sessionId: string): Promise<CompactResult> {
+    const already = compacting.get(sessionId)
+    if (already) return already
+    compactState(sessionId, { status: 'running' })
+    const job = runCompaction(sessionId)
+      .then((result) => {
+        compactState(sessionId, !result.error || result.error === 'nothing' ? null : { status: 'error', error: result.error })
+        return result
+      })
+      .finally(() => compacting.delete(sessionId))
+    compacting.set(sessionId, job)
+    return job
+  }
+
   // title: set when the session still has the placeholder title and this is its first round.
   function start(
     session: Session,
@@ -241,29 +368,14 @@ export function createChat({
     thinking: ThinkingLevel,
     title: { question: Message; placeholder: string } | null
   ): void {
-    const mainSession = session.kind === 'thread' ? getSession(db, session.parentSessionId) : session
-    const project = mainSession.projectId === null ? null : getProject(db, mainSession.projectId)
-    const projectSessions = model.supportsTools && project?.memoryEnabled
-      ? listProjectSessionRefs(db, project.id, mainSession.id)
-      : []
-    const conversation = {
-      session,
-      messages: listMessages(db, session.id),
-      parentMessages: session.kind === 'thread' ? listMessages(db, mainSession.id) : []
-    }
-    const context = buildContext({
-      ...conversation,
-      projectPrompt: project?.systemPrompt ?? null,
-      projectSessions,
-      globalPrompt: getGlobalPrompt(db),
-      model,
-      thinking,
-      files
-    })
+    const input = contextInputFor(session, model, thinking, files)
+    const { projectSessions } = input
+    const context = buildContext(input)
 
-    // Documents the context shows as a page map; the model reads them through these tools (D-077).
+    // Documents the context shows as a page map, compacted messages' ones included; the model reads them through
+    // these tools (D-077).
     const documentIds = new Set(
-      conversationMessages(conversation).flatMap((m) => m.attachments.flatMap((a) => (a.type === 'file' ? [a.fileId] : [])))
+      conversationMessages(input).flatMap((m) => m.attachments.flatMap((a) => (a.type === 'file' ? [a.fileId] : [])))
     )
     const documents = [...documentIds].map((id) => files.get(id)!.record).filter((f) => readsByTool(f, model))
     const allTools = combineTools([
@@ -283,7 +395,12 @@ export function createChat({
       signal: controller.signal
     })
       .then(async (reply) => {
-        if (!title || reply.status !== 'done') return
+        // A session deleted meanwhile (e.g. by sync) took the reply with it.
+        if (reply.status !== 'done' || !findMessage(db, assistantMessage.id)) return
+        if (!compacting.has(session.id) && shouldAutoCompact(usageNow(session.id, model))) {
+          void compact(session.id)
+        }
+        if (!title) return
         const generated = await generateTitle(
           stream,
           conn,
@@ -390,8 +507,16 @@ export function createChat({
       running.get(messageId)?.controller.abort()
     },
 
+    compact,
+
+    contextUsage(sessionId, modelId) {
+      return usageNow(sessionId, getModel(db, modelId))
+    },
+
     async idle() {
+      // A reply that ends can start a compaction, so wait for those after the replies.
       await Promise.all([...running.values()].map((r) => r.done))
+      await Promise.all([...compacting.values()])
     },
 
     withLiveReplies(messages) {

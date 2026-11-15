@@ -11,6 +11,7 @@ import {
   PaperclipIcon,
   ThreadBranchIcon
 } from '@renderer/components/common/Icons'
+import { CompactDivider } from '@renderer/components/chat/ContextMeter'
 import { MessageItem } from '@renderer/components/chat/MessageItem'
 import { ChatInputBox } from '@renderer/components/chat/ChatInputBox'
 const NoteView = React.lazy(() => import('@renderer/components/note-editor/NoteView').then((m) => ({ default: m.NoteView })))
@@ -101,6 +102,9 @@ const ThreadTab: React.FC = () => {
         : [],
     [currentThread, messages]
   )
+  // A fork thread can be compacted through a main-session message it starts from: everything shown is after it.
+  const compactedBeforeThread =
+    currentThread?.compactThroughId != null && !threadMessages.some((m) => m.id === currentThread.compactThroughId)
 
   const marksByMessage = useMemo(() => {
     const map = new Map<string, Mark[]>()
@@ -149,6 +153,7 @@ const ThreadTab: React.FC = () => {
         </div>
 
         <div ref={scrollRef} className="thread-messages-scroll">
+          {currentThread && compactedBeforeThread && <CompactDivider sessionId={currentThread.id} />}
           {threadMessages.map((msg, idx) => (
             <div key={msg.id} className="thread-message-item">
               <MessageItem
@@ -163,6 +168,7 @@ const ThreadTab: React.FC = () => {
                 onBringBack={bringBackWhole}
                 onSelectClip={openNoteClip}
               />
+              {currentThread && msg.id === currentThread.compactThroughId && <CompactDivider sessionId={currentThread.id} />}
             </div>
           ))}
         </div>

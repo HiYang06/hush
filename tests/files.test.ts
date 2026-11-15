@@ -200,7 +200,7 @@ describe('sentFileIds', () => {
     providerId: null,
     modelId: null,
     inputTokens: null,
-    outputTokens: null,
+    outputTokens: null, contextTokens: null,
     web: null,
     createdAt
   })

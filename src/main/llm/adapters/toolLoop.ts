@@ -14,7 +14,7 @@ export type Round<N> = (history: N[], toolsAllowed: boolean) => AsyncGenerator<S
 export const MAX_TOOL_ROUNDS = 6
 
 // Request → run the tools it asks for → send the results back → request again, until it answers.
-// Usage is summed over the rounds, since each one is billed.
+// Usage is summed over the rounds, since each one is billed; context is what the first round was sent.
 export async function* runRounds<N>(
   tools: Tools | undefined,
   history: N[],
@@ -22,7 +22,7 @@ export async function* runRounds<N>(
   toolResults: (calls: ToolCall[], outputs: ToolOutput[]) => N[],
   signal: AbortSignal
 ): AsyncGenerator<StreamEvent> {
-  const usage: Usage = { input: 0, output: 0 }
+  const usage = { input: 0, output: 0, context: 0 }
   let wroteText = false
   for (let i = 0; ; i++) {
     const allowed = tools !== undefined && i < MAX_TOOL_ROUNDS
@@ -42,6 +42,7 @@ export async function* runRounds<N>(
     }
     const end = next.value
     if (!end) return
+    if (i === 0) usage.context = end.usage.input
     usage.input += end.usage.input
     usage.output += end.usage.output
     if (!tools || !allowed || end.calls.length === 0) {

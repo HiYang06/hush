@@ -1,12 +1,14 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import type { MainSession, ThinkingLevel } from '@shared/types'
 import { countImages, MAX_IMAGES_PER_MESSAGE, planFile } from '@shared/files'
 import { pastedSessionId } from '@shared/sessionLinks'
 import { effectiveThinkingLevel } from '@shared/thinking'
 import { PaperclipIcon } from '@renderer/components/common/Icons'
+import { useDismiss } from '@renderer/components/common/useDismiss'
 import { errorText } from '@renderer/lib/errors'
-import { estimateTokens } from '@renderer/lib/tokens'
+import { estimateTokens } from '@shared/tokens'
 import { EMPTY_CHAT_DRAFT, streamingReplyIn, useAppStore, type ChatDraft, type PendingFile, type ChatTarget, type ThreadResult } from '@renderer/stores/appStore'
+import { ContextMeter } from './ContextMeter'
 import { FileCard, PendingFileCard } from './FileCard'
 import { NoteRefPicker, type NoteRef, type NoteRefPickerHandle } from './NoteRefPicker'
 
@@ -272,30 +274,8 @@ const ChatInput: React.FC<ChatInputBoxProps & { draftKey: string }> = ({
     if (markQuiz) textareaRef.current?.focus()
   }, [markQuiz])
 
-  useEffect(() => {
-    if (!openMenu) return
-
-    const onPointerDown = (e: MouseEvent): void => {
-      if (plaqueRef.current && !plaqueRef.current.contains(e.target as Node)) {
-        setOpenMenu(null)
-      }
-    }
-
-    const onKeyDown = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') {
-        // Handled: the mini window, listening on window, stays open.
-        e.preventDefault()
-        setOpenMenu(null)
-      }
-    }
-
-    document.addEventListener('mousedown', onPointerDown)
-    document.addEventListener('keydown', onKeyDown)
-    return () => {
-      document.removeEventListener('mousedown', onPointerDown)
-      document.removeEventListener('keydown', onKeyDown)
-    }
-  }, [openMenu])
+  const closeMenu = useCallback(() => setOpenMenu(null), [])
+  useDismiss(plaqueRef, openMenu !== null, closeMenu)
 
   const shownThinkingLevel = currentModel
     ? effectiveThinkingLevel(currentModel, thinkingLevel)
@@ -663,62 +643,65 @@ const ChatInput: React.FC<ChatInputBoxProps & { draftKey: string }> = ({
           </div>
         </div>
 
-        {isStreaming ? (
-          <button
-            type="button"
-            className="chat-send-btn stop-mode"
-            onClick={() => sessionId && stopStreaming(sessionId)}
-            aria-label="停止生成"
-            title="停止生成"
-          >
-            <svg
-              className="chat-send-icon"
-              viewBox="0 0 24 24"
-              fill="none"
-               aria-hidden="true"
+        <div className="chat-input-meta-right">
+          {sessionId && currentModel && <ContextMeter sessionId={sessionId} modelId={currentModel.id} />}
+          {isStreaming ? (
+            <button
+              type="button"
+              className="chat-send-btn stop-mode"
+              onClick={() => sessionId && stopStreaming(sessionId)}
+              aria-label="停止生成"
+              title="停止生成"
             >
-              <rect
-                x="7"
-                y="7"
-                width="10"
-                height="10"
-                rx="1.8"
-                fill="currentColor"
-              />
-            </svg>
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="chat-send-btn"
-            disabled={!canSend}
-            onClick={handleSend}
-            aria-label="发送"
-            title="发送 (Enter)"
-          >
-            <svg
-              className="chat-send-icon"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.95"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
+              <svg
+                className="chat-send-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                 aria-hidden="true"
+              >
+                <rect
+                  x="7"
+                  y="7"
+                  width="10"
+                  height="10"
+                  rx="1.8"
+                  fill="currentColor"
+                />
+              </svg>
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="chat-send-btn"
+              disabled={!canSend}
+              onClick={handleSend}
+              aria-label="发送"
+              title="发送 (Enter)"
             >
-              <g transform="rotate(38 12 12)">
-                {/* Nib body */}
-                <path d="M12 2.5L5.8 13.2L8.2 18.8H15.8L18.2 13.2L12 2.5Z" />
-                {/* Nib slit */}
-                <line x1="12" y1="3" x2="12" y2="11.2" />
-                {/* Breather hole */}
-                <circle cx="12" cy="12.6" r="1.35" fill="currentColor" stroke="none" />
-                {/* Collar base */}
-                <line x1="7.2" y1="21.2" x2="16.8" y2="21.2" />
-              </g>
-            </svg>
-          </button>
-        )}
+              <svg
+                className="chat-send-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.95"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <g transform="rotate(38 12 12)">
+                  {/* Nib body */}
+                  <path d="M12 2.5L5.8 13.2L8.2 18.8H15.8L18.2 13.2L12 2.5Z" />
+                  {/* Nib slit */}
+                  <line x1="12" y1="3" x2="12" y2="11.2" />
+                  {/* Breather hole */}
+                  <circle cx="12" cy="12.6" r="1.35" fill="currentColor" stroke="none" />
+                  {/* Collar base */}
+                  <line x1="7.2" y1="21.2" x2="16.8" y2="21.2" />
+                </g>
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
     </div>
   )

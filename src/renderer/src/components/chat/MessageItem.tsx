@@ -4,12 +4,15 @@ import type {
   FileRecord,
   Mark,
   MarkCategory,
+  ContextUsage,
   Message,
   NoteClipSource,
+  NothingReason,
   ThreadSession
 } from '@shared/types'
+import { NOTHING_REASONS } from '@shared/compact'
 import { ERROR_LEADS, errorText } from '@renderer/lib/errors'
-import { estimateTokens } from '@renderer/lib/tokens'
+import { estimateTokens } from '@shared/tokens'
 import { streamingReplyIn, useAppStore, type MarkCardState } from '@renderer/stores/appStore'
 import { FileCard } from './FileCard'
 import { MarkdownContent } from './MarkdownContent'
@@ -129,6 +132,35 @@ const AttachmentCardItem: React.FC<{
 // The provider's own words go below, as they are: they say what exactly went wrong (product.md §2).
 const ReplyError: React.FC<{ message: Message; onRetry: () => void }> = ({ message, onRetry }) => {
   const openSettings = useAppStore((s) => s.openSettings)
+  const compactSession = useAppStore((s) => s.compactSession)
+  const compactState = useAppStore((s) => s.compactStates[message.sessionId])
+  const compacting = compactState?.status === 'running'
+  const modelId = useAppStore((s) => s.sessions.find((x) => x.id === message.sessionId)?.modelId ?? null)
+  const compactedAt = useAppStore((s) => s.sessions.find((x) => x.id === message.sessionId)?.compactedAt ?? null)
+  const [usage, setUsage] = useState<ContextUsage | null>(null)
+  // Only this reply's own click shows a failure here; the card shows the session's.
+  const [compactError, setCompactError] = useState<string | null>(null)
+  const isContextError = message.errorKind === 'context_length'
+
+  useEffect(() => {
+    if (!isContextError || modelId === null) return
+    let current = true
+    void window.api.invoke('compact:usage', message.sessionId, modelId).then((u) => current && setUsage(u))
+    return () => {
+      current = false
+    }
+  }, [isContextError, message.sessionId, modelId, compactedAt, compacting])
+
+  // The main process says whether compacting can help; when it can't, its reason shows instead of the button.
+  const nothingReason: NothingReason | null = modelId === null ? 'model_deleted' : (usage?.nothingReason ?? null)
+  useEffect(() => {
+    if (compacting) setCompactError(null)
+  }, [compacting])
+  const compactThenRetry = async (): Promise<void> => {
+    const result = await compactSession(message.sessionId)
+    if (result.ok) onRetry()
+    else if (result.error !== 'nothing') setCompactError(result.error)
+  }
   return (
     <div className="reply-error">
       <div className="reply-error-lead">
@@ -141,8 +173,15 @@ const ReplyError: React.FC<{ message: Message; onRetry: () => void }> = ({ messa
         <button type="button" className="message-action-btn" onClick={onRetry}>
           重试
         </button>
+        {isContextError && usage && !nothingReason && (
+          <button type="button" className="message-action-btn" disabled={compacting} onClick={() => void compactThenRetry()}>
+            {compacting ? '正在压缩…' : '压缩后重试'}
+          </button>
+        )}
       </div>
       {message.error && <div className="reply-error-detail">{message.error}</div>}
+      {compactError && <div className="reply-error-detail">压缩失败：{compactError}</div>}
+      {isContextError && nothingReason && <div className="reply-error-detail">{NOTHING_REASONS[nothingReason]}</div>}
     </div>
   )
 }

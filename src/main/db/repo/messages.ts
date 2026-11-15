@@ -6,7 +6,8 @@ import { plainText } from '@shared/search'
 
 const MESSAGE_COLUMNS = `id, session_id AS sessionId, seq, role, content, thinking,
   thinking_ms AS thinkingMs, attachments, status, error, error_kind AS errorKind, provider_id AS providerId,
-  model_id AS modelId, input_tokens AS inputTokens, output_tokens AS outputTokens, web,
+  model_id AS modelId, input_tokens AS inputTokens, output_tokens AS outputTokens,
+  context_tokens AS contextTokens, web,
   created_at AS createdAt`
 
 function toMessage(row: Record<string, unknown>): Message {
@@ -101,6 +102,7 @@ export type ReplyProgress = {
   errorKind: ErrorKind | null
   inputTokens: number | null
   outputTokens: number | null
+  contextTokens: number | null
   web: WebActivity | null
 }
 
@@ -114,7 +116,7 @@ export function saveReply(db: Database.Database, id: string, reply: ReplyProgres
   db.prepare(
     `UPDATE messages SET content = @content, plain = @plain, thinking = @thinking, thinking_ms = @thinkingMs,
        status = @status, error = @error, error_kind = @errorKind, input_tokens = @inputTokens, output_tokens = @outputTokens,
-       web = @web
+       context_tokens = @contextTokens, web = @web
      WHERE id = @id`
   ).run({ ...reply, plain: replyPlainText(reply), web: reply.web && JSON.stringify(reply.web), id })
 }

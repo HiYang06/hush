@@ -115,6 +115,11 @@ export function registerIpc(
     emit: chatEvents.emit,
     sessionUpdated: (session) => {
       for (const win of BrowserWindow.getAllWindows()) win.webContents.send('session:updated', session)
+    },
+    compactState: (sessionId, state) => {
+      for (const win of BrowserWindow.getAllWindows()) win.webContents.send('compact:state', { sessionId, state })
+      // An error can still follow a pass whose summary was saved.
+      if (state?.status !== 'running') sync.changed()
     }
   })
   const organizer = createOrganizer({
@@ -205,6 +210,8 @@ export function registerIpc(
     chat.stop(messageId)
     chatEvents.flush(messageId)
   })
+  handle('compact:run', (sessionId) => chat.compact(sessionId))
+  handle('compact:usage', (sessionId, modelId) => chat.contextUsage(sessionId, modelId))
   handle('organize:start', (input) => organizer.start(input))
   handle('organize:stop', (jobId) => organizer.stop(jobId))
 

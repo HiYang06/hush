@@ -33,7 +33,7 @@ function msg(id: string, seq: number, role: 'user' | 'assistant', content: strin
     providerId: null,
     modelId: null,
     inputTokens: null,
-    outputTokens: null,
+    outputTokens: null, contextTokens: null,
     web: null,
     createdAt: 0,
     ...extra
@@ -122,7 +122,7 @@ function setup() {
 
 const done = (u: string): StreamEvent[] => [
   { type: 'text', delta: u },
-  { type: 'done', usage: { input: 1, output: 1 }, stopReason: 'end_turn' }
+  { type: 'done', usage: { input: 1, output: 1, context: 1 }, stopReason: 'end_turn' }
 ]
 
 describe('conversationTranscript', () => {
@@ -138,7 +138,7 @@ describe('conversationTranscript', () => {
       error: null,
       errorKind: null,
       inputTokens: null,
-      outputTokens: null,
+      outputTokens: null, contextTokens: null,
       web: null
     })
     const t = createThreadSession(db, {
@@ -173,7 +173,7 @@ describe('organizer', () => {
       error: null,
       errorKind: null,
       inputTokens: null,
-      outputTokens: null, web: null
+      outputTokens: null, contextTokens: null, web: null
     })
     const t = createThreadSession(db, {
       parentSessionId: main.id,

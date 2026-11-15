@@ -2,6 +2,7 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 're
 import type { Mark, NoteClipSource, ThreadSession } from '@shared/types'
 import { streamingReplyIn, useAppStore } from '@renderer/stores/appStore'
 import { BookmarkIcon, NotePageIcon } from '@renderer/components/common/Icons'
+import { CompactDivider } from './ContextMeter'
 import { MessageItem } from './MessageItem'
 import { ChatInputBox } from './ChatInputBox'
 import { RoundRail } from './RoundRail'
@@ -352,6 +353,7 @@ const Conversation: React.FC = () => {
                     onOpenNote={openSessionNote}
                     onJumpToMessage={jumpToMessage}
                   />
+                  {msg.id === currentSession.compactThroughId && <CompactDivider sessionId={currentSession.id} />}
                   {idx === sessionMessages.length - 1 && (
                     <div ref={messagesEndRef} />
                   )}

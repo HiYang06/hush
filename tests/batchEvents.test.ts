@@ -48,7 +48,7 @@ describe('chat event batching', () => {
   const boundaries: StreamEvent[] = [
     { type: 'step', step: { type: 'search', query: 'test' } },
     { type: 'sources', sources: [] },
-    { type: 'done', usage: { input: 1, output: 2 }, stopReason: 'stop' },
+    { type: 'done', usage: { input: 1, output: 2, context: 1 }, stopReason: 'stop' },
     { type: 'error', kind: 'other', message: 'failed' }
   ]
   it.each(boundaries)('flushes pending text before $type and cancels its timer', (event) => {

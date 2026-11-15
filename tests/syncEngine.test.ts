@@ -7,6 +7,7 @@ import { openDb } from '../src/main/db'
 import { listRevisions, saveNote } from '../src/main/db/repo/notes'
 import { createProject, getProject, updateProject } from '../src/main/db/repo/projects'
 import { search } from '../src/main/db/repo/search'
+import { getSession, setCompaction } from '../src/main/db/repo/sessions'
 import { createFileStore, type FileStore } from '../src/main/files/store'
 import { prepareForLogin, syncOnce, type SyncTransport } from '../src/main/sync/engine'
 import { downloadFile, uploadPending, type ObjectTransport } from '../src/main/sync/files'
@@ -92,6 +93,21 @@ describe('sync engine', () => {
     await b.sync()
     await a.sync()
     expect(getProject(a.db, project.id).memoryEnabled).toBe(true)
+    expect(dirty(a.db) + dirty(b.db)).toBe(0)
+  })
+
+  it('carries a compaction to the other device', async () => {
+    const a = device()
+    const b = device()
+    seedSession(a.db)
+    await a.sync()
+    await b.sync()
+    expect(getSession(b.db, 's1')).toMatchObject({ compactSummary: null, compactThroughId: null, compactedAt: null })
+
+    setCompaction(a.db, 's1', { summary: '惯性的摘要', throughMessageId: 's1-m2', compactedAt: 7 })
+    await a.sync()
+    await b.sync()
+    expect(getSession(b.db, 's1')).toMatchObject({ compactSummary: '惯性的摘要', compactThroughId: 's1-m2', compactedAt: 7 })
     expect(dirty(a.db) + dirty(b.db)).toBe(0)
   })
 

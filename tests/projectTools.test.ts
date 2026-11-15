@@ -11,7 +11,7 @@ function msg(seq: number, role: Message['role'], content: string, extra: Partial
   return {
     id: `m${seq}`, sessionId: 's', seq, role, content, thinking: null, thinkingMs: null,
     attachments: [], status: 'done', error: null, errorKind: null, providerId: null,
-    modelId: null, inputTokens: null, outputTokens: null, web: null, createdAt: date,
+    modelId: null, inputTokens: null, outputTokens: null, contextTokens: null, web: null, createdAt: date,
     ...extra
   }
 }

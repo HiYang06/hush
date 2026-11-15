@@ -68,7 +68,7 @@ export const NO_CAPABILITIES: ModelCapabilities = {
 }
 
 export const MODEL_HINTS = {
-  contextWindow: '只用来显示，不影响使用。',
+  contextWindow: '用来算上下文用了多少，到 85% 时自动压缩。不填就只显示数字，不会自动压缩。',
   maxOutputTokens: '一条回答最多多长。不填就用服务商的默认值，有的只有几千，长回答会被截断。模型文档里一般叫 max tokens 或最大输出。',
   supportsVision: '能看图片。拿不准就先不勾，发图时会提醒你。',
   supportsThinking: '会先想一会儿再回答。勾上后，输入框旁边才有思考强度。',

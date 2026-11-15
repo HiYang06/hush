@@ -3,16 +3,17 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { describe, expect, it, vi } from 'vitest'
 import { PPTX_MIME } from '@shared/files'
-import type { Attachment, FileRecord, Message, Session, StreamEvent, ThreadAnchor } from '@shared/types'
+import type { Attachment, CompactState, FileRecord, Message, Session, StreamEvent, ThreadAnchor, ThreadSession } from '@shared/types'
 import { openDb } from '../src/main/db'
 import { createMark, listMarks } from '../src/main/db/repo/marks'
 import { appendMessage, getMessage, listConversationMessages, listMessages, saveReply } from '../src/main/db/repo/messages'
 import { search } from '../src/main/db/repo/search'
 import { createProject, updateProject } from '../src/main/db/repo/projects'
-import { addModel, createProvider, updateModel } from '../src/main/db/repo/providers'
+import { addModel, createProvider, deleteModel, updateModel } from '../src/main/db/repo/providers'
 import { createMainSession, deleteSession, getSession, listSessions, renameSession } from '../src/main/db/repo/sessions'
 import { createFileStore } from '../src/main/files/store'
 import { createChat, threadTitle } from '../src/main/llm/chat'
+import { COMPACT_PROMPT, estimateRequest, SUMMARY_MAX_OUTPUT } from '../src/main/llm/compact'
 import { cleanTitle, TITLE_PROMPT, titleQuestion } from '../src/main/llm/title'
 import { buildContext, MAX_LISTED_SESSIONS, pickSystemPrompt, projectSessionList, type LoadedFile } from '../src/main/llm/context'
 import type { ChatRequest, Tools } from '../src/main/llm/types'
@@ -46,7 +47,7 @@ function msg(seq: number, role: 'user' | 'assistant', content: string, extra: Pa
     providerId: null,
     modelId: null,
     inputTokens: null,
-    outputTokens: null,
+    outputTokens: null, contextTokens: null,
     web: null,
     createdAt: 0,
     ...extra
@@ -69,7 +70,7 @@ const MAIN: Session = {
   providerId: null,
   modelId: null,
   createdAt: 0,
-  updatedAt: 0
+  updatedAt: 0, compactSummary: null, compactThroughId: null, compactedAt: null
 }
 
 function thread(contextMode: 'fork' | 'new'): Session {
@@ -116,6 +117,7 @@ function texts(req: Pick<ReturnType<typeof buildContext>, 'messages'>): [string,
 describe('buildContext', () => {
   const base = {
     parentMessages: [],
+    parentSession: null,
     projectPrompt: null,
     projectSessions: [],
     globalPrompt: '',
@@ -253,6 +255,7 @@ describe('buildContext', () => {
       ...base,
       session: thread('fork'),
       parentMessages: parent,
+      parentSession: MAIN,
       messages: [
         msg(1, 'user', '为什么？', { id: 't1' }),
         msg(2, 'assistant', '因为', { id: 't2' }),
@@ -273,6 +276,7 @@ describe('buildContext', () => {
       ...base,
       session: thread('new'),
       parentMessages: [msg(1, 'user', '什么是矩阵'), msg(2, 'assistant', '……特征值……')],
+      parentSession: MAIN,
       messages: [msg(1, 'user', '展开讲讲', { id: 't1' })]
     })
     expect(texts(req)).toEqual([['user', '关于这段话：「特征值」\n\n展开讲讲']])
@@ -324,10 +328,112 @@ function withFiles(...ids: string[]): Partial<Message> {
   return { attachments: ids.map((fileId) => ({ type: 'file', fileId })) }
 }
 
+describe('buildContext with compaction', () => {
+  const base = {
+    parentMessages: [],
+    parentSession: null,
+    projectPrompt: null,
+    projectSessions: [],
+    globalPrompt: '',
+    model: MODEL,
+    thinking: 'medium' as const,
+    files: new Map<string, LoadedFile>()
+  }
+  const compacted = (session: Session, throughId: string, summary = '摘要'): Session => ({
+    ...session,
+    compactSummary: summary,
+    compactThroughId: throughId,
+    compactedAt: 1
+  })
+  // The first kept question carries its date after the summary; these tests compare the rest.
+  const dateless = (req: ReturnType<typeof buildContext>): [string, string][] =>
+    texts(req).map(([role, t]) => [role, t.replace(/\[\d{4}-\d{2}-\d{2} 周.\]\n\n/g, '')])
+  const four = [msg(1, 'user', '一'), msg(2, 'assistant', '二'), msg(3, 'user', '三'), msg(4, 'assistant', '四')]
+
+  it('sends the summary in place of the messages up to the boundary, then the rest as they are', () => {
+    const req = build({ ...base, session: compacted(MAIN, 'm2'), messages: [...four, msg(5, 'user', '五')] })
+    expect(dateless(req)).toEqual([
+      ['user', '[前面对话的摘要]\n摘要\n\n三'],
+      ['assistant', '四'],
+      ['user', '五']
+    ])
+  })
+
+  it('dates the first kept question, since the dated one may have been compacted', () => {
+    const req = buildContext({ ...base, session: compacted(MAIN, 'm2'), messages: four })
+    expect(texts(req)[0][1]).toMatch(/^\[前面对话的摘要\]\n摘要\n\n\[\d{4}-\d{2}-\d{2} 周.\]\n\n三$/)
+  })
+
+  it('keeps the files the compacted messages attached: a PDF as its page map, others as they were sent', () => {
+    const page = { type: 'page' as const, n: 1, title: '特征值', text: '特征值的定义', tags: [], imageIds: [] }
+    const files = filesOf(
+      file('pdf', 'la.pdf', 'application/pdf', { isScanned: false, extracted: [page] }),
+      file('txt', 'a.txt', 'text/plain', { extracted: [{ type: 'text', text: '文本内容' }] })
+    )
+    const messages = [
+      msg(1, 'user', '一', withFiles('pdf', 'txt')),
+      msg(2, 'assistant', '二'),
+      msg(3, 'user', '再看', withFiles('pdf')),
+      msg(4, 'assistant', '好'),
+      msg(5, 'user', '三')
+    ]
+    const req = build({ ...base, model: { ...MODEL, supportsTools: true }, files, session: compacted(MAIN, 'm4'), messages })
+    const first = dateless(req)[0][1]
+    expect(first).toMatch(/^\[前面对话的摘要\]\n摘要\n\n\[前面对话里附过的文件\]\n\n\[文档：la\.pdf，共 1 页。/)
+    expect(first).toContain('[文件：a.txt]\n文本内容')
+    expect(first).not.toContain('特征值的定义')
+    expect(first.match(/\[文档：la\.pdf/g)).toHaveLength(1)
+    expect(first.endsWith('\n\n三')).toBe(true)
+    expect(first).not.toContain('再看')
+  })
+
+  it('sends the whole conversation when the boundary message is gone', () => {
+    const req = build({ ...base, session: compacted(MAIN, 'gone'), messages: four })
+    expect(dateless(req).map(([, t]) => t)).toEqual(['一', '二', '三', '四'])
+  })
+
+  it('builds up to `through` only, for a compaction request', () => {
+    const req = build({ ...base, session: compacted(MAIN, 'm2'), messages: [...four, msg(5, 'user', '五')], through: 'm4' })
+    expect(dateless(req)).toEqual([
+      ['user', '[前面对话的摘要]\n摘要\n\n三'],
+      ['assistant', '四']
+    ])
+  })
+
+  it('fork thread: starts from the main session\'s summary when its boundary is at or before the anchor', () => {
+    const parent = [...four, msg(5, 'user', '五'), msg(6, 'assistant', '六')]
+    const fork = { ...(thread('fork') as ThreadSession), anchorMessageId: 'm4' }
+    const own = [msg(1, 'user', '为什么？', { id: 't1' })]
+    const at = (throughId: string): [string, string][] =>
+      dateless(build({ ...base, session: fork, parentMessages: parent, parentSession: compacted(MAIN, throughId), messages: own }))
+    expect(at('m2')).toEqual([
+      ['user', '[前面对话的摘要]\n摘要\n\n三'],
+      ['assistant', '四'],
+      ['user', '我在读你上面的回答时，对这段不太理解：「特征值」\n\n为什么？']
+    ])
+    expect(at('m4')[0]).toEqual(['user', '[前面对话的摘要]\n摘要\n\n我在读你上面的回答时，对这段不太理解：「特征值」\n\n为什么？'])
+    // A boundary after the anchor summarizes replies the thread never saw.
+    expect(at('m6').map(([, t]) => t).slice(0, 4)).toEqual(['一', '二', '三', '四'])
+  })
+
+  it('fork thread: its own compaction wins over the main session\'s', () => {
+    const fork = compacted({ ...(thread('fork') as ThreadSession), anchorMessageId: 'm4' }, 't2', '追问的摘要')
+    const req = build({
+      ...base,
+      session: fork,
+      parentMessages: four,
+      parentSession: compacted(MAIN, 'm2'),
+      messages: [msg(1, 'user', '问', { id: 't1' }), msg(2, 'assistant', '答', { id: 't2' }), msg(3, 'user', '再问', { id: 't3' })]
+    })
+    expect(dateless(req)).toEqual([['user', '[前面对话的摘要]\n追问的摘要\n\n再问']])
+  })
+})
+
 describe('buildContext with files', () => {
   const base = {
     session: MAIN,
     parentMessages: [],
+    parentSession: null,
     projectPrompt: null,
     projectSessions: [],
     globalPrompt: '',
@@ -427,12 +533,12 @@ function fakeStream(events: StreamEvent[], delayMs = 0, title: StreamEvent[] = T
 
 const TITLE_REPLY: StreamEvent[] = [
   { type: 'text', delta: '数学 | 理解特征值' },
-  { type: 'done', usage: { input: 1, output: 1 }, stopReason: 'end_turn' }
+  { type: 'done', usage: { input: 1, output: 1, context: 1 }, stopReason: 'end_turn' }
 ]
 
 const DONE_EVENTS: StreamEvent[] = [
   { type: 'text', delta: '答' },
-  { type: 'done', usage: { input: 1, output: 1 }, stopReason: 'end_turn' }
+  { type: 'done', usage: { input: 1, output: 1, context: 1 }, stopReason: 'end_turn' }
 ]
 
 const ANCHOR: ThreadAnchor = {
@@ -470,6 +576,7 @@ function setup(
   const updated: Session[] = []
   const chat = createChat({
     db,
+    compactState: () => {},
     connection: () => ({ protocol: 'anthropic', baseUrl: 'http://x', apiKey: 'k' }),
     emit: (id, e) => emitted.push([id, e]),
     sessionUpdated: (session) => updated.push(session),
@@ -496,7 +603,7 @@ describe('chat', () => {
       { type: 'thinking', delta: '想' },
       { type: 'text', delta: '答' },
       { type: 'text', delta: '案' },
-      { type: 'done', usage: { input: 10, output: 20 }, stopReason: 'end_turn' }
+      { type: 'done', usage: { input: 10, output: 20, context: 10 }, stopReason: 'end_turn' }
     ])
     const { session, userMessage, assistantMessage } = send('什么是特征值，为什么它在矩阵分解中很重要')
     expect(session.title).toBe('什么是特征值，为什么它在矩阵分')
@@ -521,7 +628,7 @@ describe('chat', () => {
       thinking: '想',
       status: 'done',
       inputTokens: 10,
-      outputTokens: 20
+      outputTokens: 20, contextTokens: 10
     })
     expect(getMessage(db, assistantMessage.id).thinkingMs).toBeGreaterThanOrEqual(0)
   })
@@ -534,6 +641,7 @@ describe('chat', () => {
     const reachedHalfway = new Promise<void>((r) => (halfway = r))
     const chat = createChat({
       db,
+      compactState: () => {},
       connection: () => ({ protocol: 'anthropic', baseUrl: 'http://x', apiKey: 'k' }),
       emit: () => {},
       sessionUpdated: () => {},
@@ -547,7 +655,7 @@ describe('chat', () => {
         yield { type: 'text', delta: '案' }
         halfway()
         await finished
-        yield { type: 'done', usage: { input: 1, output: 1 }, stopReason: 'end_turn' }
+        yield { type: 'done', usage: { input: 1, output: 1, context: 1 }, stopReason: 'end_turn' }
       }
     })
     const { session, assistantMessage } = chat.send({
@@ -566,7 +674,7 @@ describe('chat', () => {
   })
 
   it('titles a new session after its first reply, unless the user renamed it meanwhile', async () => {
-    const done: StreamEvent[] = [{ type: 'text', delta: '答' }, { type: 'done', usage: { input: 1, output: 1 }, stopReason: 'end_turn' }]
+    const done: StreamEvent[] = [{ type: 'text', delta: '答' }, { type: 'done', usage: { input: 1, output: 1, context: 1 }, stopReason: 'end_turn' }]
     const { db, chat, send, titleRequests, updated } = setup(done)
     const { session } = send('什么是特征值')
     await chat.idle()
@@ -593,7 +701,7 @@ describe('chat', () => {
     expect(failed.titleRequests).toEqual([])
 
     const titleFails = setup(
-      [{ type: 'done', usage: { input: 1, output: 1 }, stopReason: 'end_turn' }],
+      [{ type: 'done', usage: { input: 1, output: 1, context: 1 }, stopReason: 'end_turn' }],
       0,
       () => null,
       [{ type: 'error', kind: 'rate_limit', message: '429' }]
@@ -662,7 +770,7 @@ describe('chat', () => {
   })
 
   it('continues an existing session with its earlier turns', async () => {
-    const { chat, send, requests } = setup([{ type: 'text', delta: '好' }, { type: 'done', usage: { input: 1, output: 1 }, stopReason: 'end_turn' }])
+    const { chat, send, requests } = setup([{ type: 'text', delta: '好' }, { type: 'done', usage: { input: 1, output: 1, context: 1 }, stopReason: 'end_turn' }])
     const first = send('第一问')
     await chat.idle()
     send('第二问', first.session.id)
@@ -689,7 +797,7 @@ describe('chat', () => {
       [
         { type: 'text', delta: '第一段' },
         { type: 'text', delta: '第二段' },
-        { type: 'done', usage: { input: 1, output: 1 }, stopReason: 'end_turn' }
+        { type: 'done', usage: { input: 1, output: 1, context: 1 }, stopReason: 'end_turn' }
       ],
       30
     )
@@ -705,7 +813,7 @@ describe('chat', () => {
       [
         { type: 'text', delta: 'a' },
         ...Array.from({ length: 6 }, () => ({ type: 'text' as const, delta: 'b' })),
-        { type: 'done', usage: { input: 1, output: 1 }, stopReason: 'end_turn' }
+        { type: 'done', usage: { input: 1, output: 1, context: 1 }, stopReason: 'end_turn' }
       ],
       110
     )
@@ -732,6 +840,7 @@ describe('chat', () => {
     })
     const chat = createChat({
       db,
+      compactState: () => {},
       connection: () => {
         throw new Error('keychain unavailable')
       },
@@ -756,7 +865,7 @@ describe('chat', () => {
         { type: 'step', step: { type: 'search', query: '特征值' } },
         { type: 'sources', sources },
         { type: 'text', delta: '答 [1]' },
-        { type: 'done', usage: { input: 1, output: 1 }, stopReason: 'end_turn' }
+        { type: 'done', usage: { input: 1, output: 1, context: 1 }, stopReason: 'end_turn' }
       ],
       0,
       () => tools
@@ -796,6 +905,33 @@ describe('chat', () => {
     await chat.idle()
     expect(requests[1].tools).toBeUndefined()
     expect(texts(undated(requests[1]))[0][1]).toBe('[文件：la.pdf]\n\n## 第 1 页\n特征值\n特征值的定义\n\n讲讲')
+  })
+
+  it('a PDF attached in the compacted part can still be read through the tools', async () => {
+    const { chat, send, requests, files } = setup(DONE_EVENTS)
+    const page = { type: 'page' as const, n: 1, title: '特征值', text: '特征值的定义', tags: [], imageIds: [] }
+    const pdf = files.add({ name: 'la.pdf', mime: 'application/pdf', data: new Uint8Array([1]), extracted: [page], isScanned: false })
+    const { session } = send('讲讲', null, [{ type: 'file', fileId: pdf.id }])
+    await chat.idle()
+    // Two rounds of about 12k tokens each: only the newest stays word for word, so the PDF's round is compacted.
+    send('b'.repeat(48_000), session.id)
+    await chat.idle()
+    send('c'.repeat(48_000), session.id)
+    await chat.idle()
+    expect(await chat.compact(session.id)).toMatchObject({ ok: true })
+
+    send('第 1 页讲了什么', session.id)
+    await chat.idle()
+    const last = requests.at(-1)!
+    const sent = JSON.stringify(last.messages)
+    expect(sent).toContain('[前面对话的摘要]')
+    expect(sent).not.toContain('讲讲')
+    expect(sent).toContain('la.pdf')
+    expect(last.tools?.specs.map((s) => s.name)).toEqual(['search_document', 'read_document_pages'])
+    const read = last.tools!.run({ id: '1', name: 'read_document_pages', input: { file: 'la.pdf', start_page: 1, end_page: 1 } }, new AbortController().signal)
+    let next = await read.next()
+    while (!next.done) next = await read.next()
+    expect(next.value).toContain('特征值的定义')
   })
 
   it('reads only requested document pages and caches their bytes within one reply', async () => {
@@ -839,7 +975,7 @@ describe('chat', () => {
   })
 
   it('reads attached files from disk and sends them', async () => {
-    const { chat, send, requests, files, db } = setup([{ type: 'done', usage: { input: 1, output: 1 }, stopReason: 'end_turn' }])
+    const { chat, send, requests, files, db } = setup([{ type: 'done', usage: { input: 1, output: 1, context: 1 }, stopReason: 'end_turn' }])
     db.prepare('UPDATE models SET supports_vision = 1').run()
     const image = files.add({ name: 'a.png', mime: 'image/png', data: new Uint8Array([1, 2, 3]), extracted: null, isScanned: null })
     send('这是什么', null, [{ type: 'file', fileId: image.id }])
@@ -854,7 +990,7 @@ describe('chat', () => {
   })
 
   it('starts a new session inside a project and answers with that project prompt', async () => {
-    const { db, chat, model, requests } = setup([{ type: 'done', usage: { input: 1, output: 1 }, stopReason: 'end_turn' }])
+    const { db, chat, model, requests } = setup([{ type: 'done', usage: { input: 1, output: 1, context: 1 }, stopReason: 'end_turn' }])
     const project = createProject(db, '线性代数')
     updateProject(db, project.id, { systemPrompt: '你是线性代数助教' })
     const { session } = chat.send({ sessionId: null, projectId: project.id, newThread: null, text: '问', attachments: [], modelId: model.id, thinking: 'off', webSearch: false })
@@ -926,7 +1062,7 @@ describe('chat', () => {
     const answer = appendMessage(db, previous.id, { role: 'assistant', providerId: model.providerId, modelId: model.id })
     saveReply(db, answer.id, {
       content: '特征值满足 Av = λv', thinking: null, thinkingMs: null, status: 'done', error: null,
-      errorKind: null, inputTokens: null, outputTokens: null, web: null
+      errorKind: null, inputTokens: null, outputTokens: null, contextTokens: null, web: null
     })
     const pdf = files.add({ name: '当前讲义.pdf', mime: 'application/pdf', data: Buffer.from('pdf'), extracted: [
       { type: 'page', n: 1, title: '复习', text: '矩阵', tags: [], imageIds: [] }
@@ -935,6 +1071,7 @@ describe('chat', () => {
     const readFile = vi.fn(files.read)
     const chat = createChat({
       db,
+      compactState: () => {},
       connection: () => ({ protocol: 'anthropic', baseUrl: 'http://x', apiKey: 'k' }),
       emit: () => {}, sessionUpdated: () => {}, checkFile: files.check, readFile,
       ensureFile: async () => {},
@@ -954,7 +1091,7 @@ describe('chat', () => {
           results.push(result as string)
         }
         yield { type: 'text', delta: '记得了' }
-        yield { type: 'done', usage: { input: 1, output: 1 }, stopReason: 'end_turn' }
+        yield { type: 'done', usage: { input: 1, output: 1, context: 1 }, stopReason: 'end_turn' }
       }
     })
     const sent = chat.send({ sessionId: null, projectId: project.id, newThread: null, text: '之前聊过什么', attachments: [{ type: 'file', fileId: pdf.id }], modelId: model.id, thinking: 'off', webSearch: true })
@@ -975,7 +1112,7 @@ describe('chat', () => {
   it('starts a fork thread on its first message, with the main conversation up to the anchor and the prefix', async () => {
     const { db, chat, send, requests } = setup([
       { type: 'text', delta: '答' },
-      { type: 'done', usage: { input: 1, output: 1 }, stopReason: 'end_turn' }
+      { type: 'done', usage: { input: 1, output: 1, context: 1 }, stopReason: 'end_turn' }
     ])
     const main = send('什么是 SVD')
     await chat.idle()
@@ -1017,6 +1154,7 @@ describe('chat', () => {
     const read: string[] = []
     const chat = createChat({
       db,
+      compactState: () => {},
       connection: () => ({ protocol: 'anthropic', baseUrl: 'http://x', apiKey: 'k' }),
       emit: () => {},
       sessionUpdated: () => {},
@@ -1167,6 +1305,7 @@ describe('chat', () => {
     const updated: Session[] = []
     const chat = createChat({
       db: failed.db,
+      compactState: () => {},
       connection: () => ({ protocol: 'anthropic', baseUrl: 'http://x', apiKey: 'k' }),
       emit: () => {},
       sessionUpdated: (s) => updated.push(s),
@@ -1188,6 +1327,7 @@ describe('chat', () => {
     const { session } = send('问')
     createChat({
       db,
+      compactState: () => {},
       connection: () => ({ protocol: 'anthropic', baseUrl: '', apiKey: '' }),
       emit: () => {},
       sessionUpdated: () => {},
@@ -1205,5 +1345,364 @@ describe('threadTitle', () => {
     expect(threadTitle('  特征值\n分解  ')).toBe('特征值 分解')
     expect(threadTitle('一'.repeat(31))).toBe(`${'一'.repeat(30)}…`)
     expect(threadTitle('一'.repeat(30))).toBe('一'.repeat(30))
+  })
+})
+
+describe('compact', () => {
+  const COMPACT = (req: ChatRequest): boolean => {
+    const last = req.messages.at(-1)?.content.at(-1)
+    return last?.type === 'text' && last.text === COMPACT_PROMPT
+  }
+  // n characters of Latin text estimate to n / 4 tokens.
+  const sized = (tokens: number): string => 'a'.repeat(tokens * 4)
+  const firstText = (req: ChatRequest): string => req.messages[0].content.map((p) => (p.type === 'text' ? p.text : '')).join('')
+
+  // reply: the context the provider reports for a normal reply. summaries: what each compaction answers, in turn;
+  // a compaction waits while `hold` is set.
+  function setup(contextWindow: number | null, reply = { context: 1, text: '答' }) {
+    const db = openDb(':memory:')
+    const provider = createProvider(db, { name: 'P', protocol: 'anthropic', baseUrl: 'http://x', apiKeyEnc: null })
+    const model = addModel(db, provider.id, {
+      modelName: 'm', displayName: 'M', supportsVision: false, supportsThinking: false, thinkingCanDisable: true,
+      supportsTools: false, contextWindow, maxOutputTokens: 8000
+    })
+    const session = createMainSession(db, { title: '会话', projectId: null, providerId: provider.id, modelId: model.id })
+    const requests: ChatRequest[] = []
+    const compactions: ChatRequest[] = []
+    const states: (CompactState | null)[] = []
+    // replyHold: a normal reply waits for it before it ends. replyError: a normal reply fails as too long.
+    // stopReason: what a compaction ends with.
+    const control = {
+      hold: null as Promise<void> | null, fail: false, reply, replyHold: null as Promise<void> | null,
+      replyError: false, stopReason: 'end_turn'
+    }
+    const chat = createChat({
+      db,
+      compactState: (_id, state) => states.push(state),
+      connection: () => ({ protocol: 'anthropic', baseUrl: 'http://x', apiKey: 'k' }),
+      emit: () => {}, sessionUpdated: () => {}, checkFile: () => {}, readFile: () => Buffer.alloc(0),
+      ensureFile: async () => {}, webTools: () => null,
+      stream: async function* (_conn, req) {
+        if (COMPACT(req)) {
+          compactions.push(req)
+          if (control.hold) await control.hold
+          if (control.fail) {
+            yield { type: 'error', kind: 'other', message: '服务商出错' }
+            return
+          }
+          yield { type: 'text', delta: `摘要${compactions.length}` }
+          yield { type: 'done', usage: { input: 1, output: 1, context: 1 }, stopReason: control.stopReason }
+          return
+        }
+        requests.push(req)
+        if (control.replyError) {
+          yield { type: 'error', kind: 'context_length', message: 'prompt is too long' }
+          return
+        }
+        yield { type: 'text', delta: control.reply.text }
+        if (control.replyHold) await control.replyHold
+        yield { type: 'done', usage: { input: 1, output: 1, context: control.reply.context }, stopReason: 'end_turn' }
+      }
+    })
+    // Rounds already in the session, written directly: question and answer of the given estimated sizes.
+    const seed = (...rounds: [number, number][]): void => {
+      for (const [q, a] of rounds) {
+        appendMessage(db, session.id, { role: 'user', content: sized(q), attachments: [] })
+        const reply = appendMessage(db, session.id, { role: 'assistant', providerId: provider.id, modelId: model.id })
+        saveReply(db, reply.id, {
+          content: sized(a), thinking: null, thinkingMs: null, status: 'done', error: null, errorKind: null,
+          inputTokens: null, outputTokens: null, contextTokens: null, web: null
+        })
+      }
+    }
+    const send = async (text: string, attachments: Attachment[] = []): Promise<void> => {
+      chat.send({ sessionId: session.id, projectId: null, newThread: null, text, attachments, modelId: model.id, thinking: 'off', webSearch: false })
+      await new Promise((r) => setTimeout(r, 0))
+    }
+    const files = createFileStore(db, mkdtempSync(join(tmpdir(), 'hush-')), noDownload)
+    return { db, chat, session, model, requests, compactions, states, control, seed, send, files }
+  }
+
+  it('runs in the background: rounds sent meanwhile follow the summary once it lands', async () => {
+    const { chat, session, requests, compactions, control, seed, send } = setup(100_000)
+    seed([15_000, 15_000], [15_000, 15_000], [100, 100])
+    let release!: () => void
+    control.hold = new Promise((r) => (release = r))
+    const job = chat.compact(session.id)
+    await send('压缩时问的第一个')
+    await send('压缩时问的第二个')
+    expect(compactions).toHaveLength(1)
+    release()
+    expect(await job).toMatchObject({ ok: true })
+    await chat.idle()
+
+    await send('压缩之后')
+    await chat.idle()
+    const after = requests.at(-1)!
+    expect(firstText(after).startsWith('[前面对话的摘要]\n摘要1')).toBe(true)
+    const all = JSON.stringify(after.messages)
+    expect(all).toContain('压缩时问的第一个')
+    expect(all).toContain('压缩时问的第二个')
+    expect(all).toContain('压缩之后')
+    // The kept round (100 + 100 tokens) is still there, word for word.
+    expect(all).toContain(sized(100))
+    expect(all).not.toContain(sized(15_000))
+  })
+
+  it('starts by itself when a reply ends at 85% or more, once at a time', async () => {
+    const { chat, compactions, control, seed, send } = setup(100_000, { context: 90_000, text: '答' })
+    seed([15_000, 15_000], [15_000, 15_000], [100, 100])
+    let release!: () => void
+    control.hold = new Promise((r) => (release = r))
+    await send('问')
+    await new Promise((r) => setTimeout(r, 10))
+    expect(compactions).toHaveLength(1)
+    await send('再问')
+    await new Promise((r) => setTimeout(r, 10))
+    expect(compactions).toHaveLength(1)
+    release()
+    await chat.idle()
+    expect(compactions).toHaveLength(1)
+  })
+
+  it('does not start below 85%, when compacting would free under 10% of the window, or with no window', async () => {
+    const below = setup(100_000, { context: 80_000, text: '答' })
+    below.seed([15_000, 15_000], [15_000, 15_000], [100, 100])
+    await below.send('问')
+    await below.chat.idle()
+    expect(below.compactions).toHaveLength(0)
+
+    // The context is mostly something compacting keeps (attachments): the old text is only 5% of the window.
+    const attachments = setup(100_000, { context: 95_000, text: '答' })
+    attachments.seed([2500, 2500], [100, 100])
+    await attachments.send('问')
+    await attachments.chat.idle()
+    expect(attachments.compactions).toHaveLength(0)
+
+    const unknown = setup(null, { context: 95_000, text: '答' })
+    unknown.seed([15_000, 15_000], [15_000, 15_000], [100, 100])
+    await unknown.send('问')
+    await unknown.chat.idle()
+    expect(unknown.compactions).toHaveLength(0)
+  })
+
+  it('compacting again hands the model the previous summary to fold in', async () => {
+    const { chat, session, compactions, seed } = setup(1_000_000)
+    seed([15_000, 15_000], [100, 100])
+    expect(await chat.compact(session.id)).toMatchObject({ ok: true })
+    seed([15_000, 15_000], [100, 100])
+    expect(await chat.compact(session.id)).toMatchObject({ ok: true })
+    expect(compactions).toHaveLength(2)
+    expect(firstText(compactions[1]).startsWith('[前面对话的摘要]\n摘要1')).toBe(true)
+    // Only the second batch's question and answer; the first is in the summary.
+    expect(JSON.stringify(compactions[1].messages).split(sized(15_000)).length - 1).toBe(2)
+  })
+
+  it('summarizes in several requests when one cannot hold everything, each within the window', async () => {
+    const window = 50_000
+    const { chat, session, compactions, seed } = setup(window)
+    seed([15_000, 15_000], [15_000, 15_000], [15_000, 15_000], [100, 100])
+    expect(await chat.compact(session.id)).toMatchObject({ ok: true })
+    expect(compactions).toHaveLength(2)
+    for (const req of compactions) expect(estimateRequest(req)).toBeLessThanOrEqual(window - SUMMARY_MAX_OUTPUT)
+  })
+
+  it('leaves the session as it was when the summary fails, and reports the error', async () => {
+    const { db, chat, session, states, control, seed } = setup(100_000)
+    seed([15_000, 15_000], [100, 100])
+    control.fail = true
+    expect(await chat.compact(session.id)).toEqual({ ok: false, error: '服务商出错' })
+    expect(getSession(db, session.id)).toMatchObject({ compactSummary: null, compactThroughId: null, compactedAt: null })
+    expect(states).toEqual([{ status: 'running' }, { status: 'error', error: '服务商出错' }])
+  })
+
+  it('a round with an attachment sent while it runs doesn\'t turn a finished compaction into a failure', async () => {
+    const { chat, session, states, control, seed, send, files } = setup(100_000)
+    seed([15_000, 15_000], [100, 100])
+    const doc = files.add({ name: 'a.txt', mime: 'text/plain', data: Buffer.from('文'), extracted: [{ type: 'text', text: '文' }], isScanned: false })
+    let release!: () => void
+    control.hold = new Promise((r) => (release = r))
+    const job = chat.compact(session.id)
+    // Once the compaction has loaded the conversation and is waiting for the summary.
+    await new Promise((r) => setTimeout(r, 10))
+    await send('附了文件', [{ type: 'file', fileId: doc.id }])
+    await new Promise((r) => setTimeout(r, 10))
+    release()
+    expect(await job).toMatchObject({ ok: true })
+    expect(states.at(-1)).toBeNull()
+  })
+
+  it('a reply sent before a compaction landed and ending after it doesn\'t start another one', async () => {
+    const { chat, session, compactions, control, seed, send } = setup(100_000, { context: 90_000, text: '答' })
+    seed([30_000, 30_000], [5000, 5000])
+    let releaseCompaction!: () => void
+    let releaseReply!: () => void
+    control.hold = new Promise((r) => (releaseCompaction = r))
+    control.replyHold = new Promise((r) => (releaseReply = r))
+    const job = chat.compact(session.id)
+    await new Promise((r) => setTimeout(r, 10))
+    // It was sent the long context, so its count is large; after the compaction the next request is ~25% full.
+    await send('b'.repeat(4 * 15_000))
+    releaseCompaction()
+    expect(await job).toMatchObject({ ok: true })
+    releaseReply()
+    await chat.idle()
+    expect(compactions).toHaveLength(1)
+  })
+
+  it('doesn\'t keep a summary cut off at the output cap', async () => {
+    const { db, chat, session, states, control, seed } = setup(100_000)
+    seed([15_000, 15_000], [100, 100])
+    control.stopReason = 'max_tokens'
+    const result = await chat.compact(session.id)
+    expect(result.ok).toBe(false)
+    expect(getSession(db, session.id)).toMatchObject({ compactSummary: null, compactThroughId: null })
+    expect(states.at(-1)?.status).toBe('error')
+    // The model's own cap is the summary's, so raising it in settings wouldn't help.
+    expect(result).toMatchObject({ error: expect.not.stringContaining('调大') })
+  })
+
+  it('a summary cut off at a model\'s own smaller cap points to raising it', async () => {
+    const { db, chat, session, model, control, seed } = setup(100_000)
+    updateModel(db, model.id, { maxOutputTokens: 2000 })
+    seed([15_000, 15_000], [100, 100])
+    control.stopReason = 'max_tokens'
+    expect(await chat.compact(session.id)).toMatchObject({ ok: false, error: expect.stringContaining('调大这个模型的最大输出') })
+  })
+
+  it('a cut ending on a question whose reply failed still alternates roles', async () => {
+    const { db, chat, session, model, compactions, seed } = setup(100_000)
+    seed([30_000, 30_000])
+    appendMessage(db, session.id, { role: 'user', content: '没答上的问题', attachments: [] })
+    const failed = appendMessage(db, session.id, { role: 'assistant', providerId: model.providerId, modelId: model.id })
+    saveReply(db, failed.id, {
+      content: '', thinking: null, thinkingMs: null, status: 'error', error: '出错', errorKind: 'other',
+      inputTokens: null, outputTokens: null, contextTokens: null, web: null
+    })
+    seed([25_000, 100])
+    expect(await chat.compact(session.id)).toMatchObject({ ok: true })
+    const roles = compactions[0].messages.map((m) => m.role)
+    expect(roles).toEqual(['user', 'assistant', 'user'])
+    expect(JSON.stringify(compactions[0].messages.at(-1))).toContain('没答上的问题')
+  })
+
+  it('压缩后重试: joins a compaction already running, then the regenerated reply goes with the summary', async () => {
+    const { db, chat, session, model, requests, control, seed, send } = setup(100_000)
+    seed([15_000, 15_000], [100, 100])
+    control.replyError = true
+    await send('太长了')
+    await chat.idle()
+    const failed = listMessages(db, session.id).at(-1)!
+    expect(failed.errorKind).toBe('context_length')
+    control.replyError = false
+    let release!: () => void
+    control.hold = new Promise((r) => (release = r))
+    const running = chat.compact(session.id)
+    expect(chat.compact(session.id)).toBe(running)
+    release()
+    expect(await running).toMatchObject({ ok: true })
+    const { assistantMessage } = chat.regenerate({ replyId: failed.id, text: null, modelId: model.id, thinking: 'off', webSearch: false })
+    await chat.idle()
+    expect(firstText(requests.at(-1)!).startsWith('[前面对话的摘要]\n摘要1')).toBe(true)
+    expect(getMessage(db, assistantMessage.id)).toMatchObject({ status: 'done', content: '答' })
+  })
+
+  it('counts nothing as compressible when the oldest round alone can\'t fit in a compaction request', async () => {
+    const { chat, session, model, states, seed, send } = setup(40_000, { context: 36_000, text: '答' })
+    seed([17_000, 17_000], [100, 100])
+    expect(chat.contextUsage(session.id, model.id)).toMatchObject({ compressible: 0, nothingReason: 'too_large' })
+    await send('问')
+    await chat.idle()
+    expect(states).toEqual([])
+    expect(await chat.compact(session.id)).toEqual({ ok: false, error: 'nothing' })
+  })
+
+  it('a compaction that brought the context under the trigger reports success even if the model is deleted next', async () => {
+    const { db, chat, session, model, control, seed } = setup(100_000)
+    seed([30_000, 30_000], [5000, 5000])
+    let release!: () => void
+    control.hold = new Promise((r) => (release = r))
+    const job = chat.compact(session.id)
+    await new Promise((r) => setTimeout(r, 10))
+    deleteModel(db, model.id)
+    release()
+    expect(await job).toMatchObject({ ok: true })
+    expect(getSession(db, session.id).compactSummary).toBe('摘要1')
+  })
+
+  it('a session deleted while its reply ends is left alone', async () => {
+    const { db, chat, session, control, seed, send } = setup(100_000, { context: 90_000, text: '答' })
+    seed([30_000, 30_000])
+    let release!: () => void
+    control.replyHold = new Promise((r) => (release = r))
+    await send('问')
+    deleteSession(db, session.id)
+    release()
+    await expect(chat.idle()).resolves.toBeUndefined()
+  })
+
+  it('says there is nothing to compact when only the recent rounds exist', async () => {
+    const { chat, session, compactions, seed } = setup(100_000)
+    seed([100, 100])
+    expect(await chat.compact(session.id)).toEqual({ ok: false, error: 'nothing' })
+    expect(compactions).toHaveLength(0)
+  })
+
+  it('counts nothing as compressible once the session\'s model is deleted, as compact refuses then', async () => {
+    const { db, chat, session, model, seed } = setup(100_000)
+    seed([30_000, 30_000], [5000, 5000])
+    const other = addModel(db, model.providerId, {
+      modelName: 'other', displayName: 'Other', supportsVision: false, supportsThinking: false, thinkingCanDisable: true,
+      supportsTools: false, contextWindow: 100_000, maxOutputTokens: 8000
+    })
+    deleteModel(db, model.id)
+    expect(chat.contextUsage(session.id, other.id)).toMatchObject({ compressible: 0, nothingReason: 'model_deleted' })
+    expect(await chat.compact(session.id)).toEqual({ ok: false, error: '这个会话用的模型已被删除' })
+  })
+
+  it('plans compressible with the session model so the meter agrees with compact when composer picks another model', async () => {
+    const small = setup(40_000)
+    small.seed([17_000, 17_000], [100, 100])
+    const bigModel = addModel(small.db, small.model.providerId, {
+      modelName: 'big', displayName: 'Big', supportsVision: false, supportsThinking: false, thinkingCanDisable: true,
+      supportsTools: false, contextWindow: 200_000, maxOutputTokens: 8000
+    })
+    expect(small.chat.contextUsage(small.session.id, bigModel.id)).toMatchObject({ compressible: 0, nothingReason: 'too_large' })
+    expect(await small.chat.compact(small.session.id)).toEqual({ ok: false, error: 'nothing' })
+
+    const big = setup(200_000)
+    big.seed([17_000, 17_000], [100, 100])
+    const smallModel = addModel(big.db, big.model.providerId, {
+      modelName: 'small', displayName: 'Small', supportsVision: false, supportsThinking: false, thinkingCanDisable: true,
+      supportsTools: false, contextWindow: 40_000, maxOutputTokens: 8000
+    })
+    expect(big.chat.contextUsage(big.session.id, smallModel.id)).toMatchObject({ compressible: 34_000, nothingReason: null })
+    expect(await big.chat.compact(big.session.id)).toMatchObject({ ok: true })
+  })
+
+  it('keeps a summary saved by pass 1 and still reports why pass 2 failed', async () => {
+    const { db, session, states, seed } = setup(50_000)
+    seed([15_000, 15_000], [15_000, 15_000], [15_000, 15_000], [100, 100])
+    let n = 0
+    const chat2 = createChat({
+      db,
+      compactState: (_id, state) => states.push(state),
+      connection: () => ({ protocol: 'anthropic', baseUrl: 'http://x', apiKey: 'k' }),
+      emit: () => {}, sessionUpdated: () => {}, checkFile: () => {}, readFile: () => Buffer.alloc(0),
+      ensureFile: async () => {}, webTools: () => null,
+      stream: async function* () {
+        n++
+        if (n === 2) {
+          yield { type: 'error', kind: 'other', message: '服务商出错' }
+          return
+        }
+        yield { type: 'text', delta: `摘要${n}` }
+        yield { type: 'done', usage: { input: 1, output: 1, context: 1 }, stopReason: 'end_turn' }
+      }
+    })
+    const result = await chat2.compact(session.id)
+    expect(result).toMatchObject({ ok: true, session: { compactSummary: '摘要1' }, error: '服务商出错' })
+    expect(getSession(db, session.id).compactSummary).toBe('摘要1')
+    expect(states).toEqual([{ status: 'running' }, { status: 'error', error: '服务商出错' }])
   })
 })

@@ -270,7 +270,7 @@ describe('streams through the SDKs', () => {
       { type: 'thinking', delta: '先看图' },
       { type: 'text', delta: '这是' },
       { type: 'text', delta: '一只猫' },
-      { type: 'done', usage: { input: 100, output: 42 }, stopReason: 'end_turn' }
+      { type: 'done', usage: { input: 100, output: 42, context: 100 }, stopReason: 'end_turn' }
     ])
     // The Models API said "disabled" is rejected but "between_tools" works.
     expect(sent.thinking).toEqual({ type: 'between_tools' })
@@ -288,7 +288,7 @@ describe('streams through the SDKs', () => {
     expect(await collect('openai_chat', '/v1')).toEqual([
       { type: 'thinking', delta: '想一想' },
       { type: 'text', delta: '答案' },
-      { type: 'done', usage: { input: 30, output: 12 }, stopReason: 'stop' }
+      { type: 'done', usage: { input: 30, output: 12, context: 30 }, stopReason: 'stop' }
     ])
   })
 
@@ -304,7 +304,7 @@ describe('streams through the SDKs', () => {
     expect(await collect('openai_responses', '/v1')).toEqual([
       { type: 'thinking', delta: '比较两者' },
       { type: 'text', delta: '结论' },
-      { type: 'done', usage: { input: 50, output: 100 }, stopReason: 'max_output_tokens' }
+      { type: 'done', usage: { input: 50, output: 100, context: 50 }, stopReason: 'max_output_tokens' }
     ])
   })
 
@@ -322,7 +322,7 @@ describe('streams through the SDKs', () => {
       { type: 'thinking', delta: '分析题目' },
       { type: 'text', delta: '答案是 42' },
       { type: 'text', delta: '。' },
-      { type: 'done', usage: { input: 20, output: 20 }, stopReason: 'STOP' }
+      { type: 'done', usage: { input: 20, output: 20, context: 20 }, stopReason: 'STOP' }
     ])
     expect(path).toContain('/models/gemini-3.8-flash:streamGenerateContent')
   })
@@ -422,7 +422,7 @@ describe('tool calls', () => {
       { type: 'thinking', delta: '要查一下' },
       { type: 'step', step: { type: 'search', query: '特征值' } },
       { type: 'text', delta: '答案 [1]' },
-      { type: 'done', usage: { input: 30, output: 12 }, stopReason: 'end_turn' }
+      { type: 'done', usage: { input: 30, output: 12, context: 10 }, stopReason: 'end_turn' }
     ])
     expect(bodies[0].tools).toEqual([{ name: 'web_search', description: '搜索', input_schema: fakeTools.specs[0].parameters }])
     expect(bodies[0]).not.toHaveProperty('tool_choice')
@@ -497,7 +497,7 @@ describe('tool calls', () => {
     )
     const events = await collect('openai_responses', '/v1', { tools: fakeTools })
     expect(events.map((e) => e.type)).toEqual(['step', 'text', 'done'])
-    expect(events.at(-1)).toMatchObject({ usage: { input: 10, output: 4 } })
+    expect(events.at(-1)).toMatchObject({ usage: { input: 10, output: 4, context: 5 } })
     expect(bodies[0]).toMatchObject({ include: ['reasoning.encrypted_content'], tools: [{ type: 'function', name: 'web_search', strict: false }] })
     expect(bodies[1].input.slice(-3)).toEqual([reasoning, call, { type: 'function_call_output', call_id: 'call_1', output: '结果：q' }])
   })

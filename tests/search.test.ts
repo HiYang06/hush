@@ -36,7 +36,7 @@ function setup() {
       error: null,
       errorKind: null,
       inputTokens: null,
-      outputTokens: null, web: null
+      outputTokens: null, contextTokens: null, web: null
     })
     return m
   }

@@ -8,7 +8,8 @@ const SESSION_COLUMNS = `id, kind, project_id AS projectId, parent_session_id AS
   anchor_message_id AS anchorMessageId, anchor_quote AS anchorQuote, anchor_start AS anchorStart,
   anchor_end AS anchorEnd, anchor_prefix AS anchorPrefix, anchor_suffix AS anchorSuffix,
   context_mode AS contextMode, title, provider_id AS providerId, model_id AS modelId,
-  created_at AS createdAt, updated_at AS updatedAt`
+  created_at AS createdAt, updated_at AS updatedAt, compact_summary AS compactSummary,
+  compact_through_id AS compactThroughId, compacted_at AS compactedAt`
 
 export function listSessions(db: Database.Database): Session[] {
   return db
@@ -116,6 +117,19 @@ export function touchSession(
     id
   )
   return getSession(db, id)
+}
+
+// Doesn't touch updated_at: compacting isn't the user doing something in the session. Null when the session
+// was deleted while its compaction ran.
+export function setCompaction(
+  db: Database.Database,
+  id: string,
+  c: { summary: string; throughMessageId: string; compactedAt: number }
+): Session | null {
+  const { changes } = db
+    .prepare('UPDATE sessions SET compact_summary = ?, compact_through_id = ?, compacted_at = ? WHERE id = ?')
+    .run(c.summary, c.throughMessageId, c.compactedAt, id)
+  return changes > 0 ? getSession(db, id) : null
 }
 
 export function getGlobalPrompt(db: Database.Database): string {

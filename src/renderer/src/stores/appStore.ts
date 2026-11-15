@@ -2,6 +2,8 @@ import { aimScroll } from '../lib/aimScroll'
 import { create } from 'zustand'
 import type {
   Attachment,
+  CompactResult,
+  CompactState,
   FileRecord,
   Mark,
   MarkCategory,
@@ -149,6 +151,10 @@ export interface AppState {
   // null until main answers at start-up.
   syncStatus: SyncStatus | null
   updateStatus: UpdateStatus | null
+  // The latest compaction state per session, from whichever window started it (D-087).
+  compactStates: Record<string, CompactState>
+  // The session whose context card the 已压缩 divider asked to open; its input box opens it.
+  contextCardFor: string | null
 
   selectSession: (sessionId: string) => void
   startNewSession: (projectId?: string | null) => void
@@ -217,6 +223,8 @@ export interface AppState {
   // Regenerates the last reply, or with text replaces the last question first. False when the user cancels.
   regenerateReply: (replyId: string, text?: string | null) => Promise<boolean>
   stopStreaming: (sessionId: string) => void
+  compactSession: (sessionId: string) => Promise<CompactResult>
+  openContextCard: (sessionId: string | null) => void
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -275,6 +283,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   searchOpen: false,
   syncStatus: null,
   updateStatus: null,
+  compactStates: {},
+  contextCardFor: null,
 
   selectSession: (sessionId) => {
     const session = get().sessions.find((s) => s.id === sessionId && s.kind === 'main')
@@ -860,7 +870,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         activeThreadId: session.id,
         draftThread: null,
         threadModelId: model.id,
-        messages: [...curr.messages, userMessage, assistantMessage]
+        messages: [...curr.messages, userMessage, assistantMessage],
+        compactStates: withoutCompactError(curr.compactStates, session.id)
       }))
       return
     }
@@ -879,6 +890,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       newSessionProjectId: null,
       markQuiz: null,
       messages: [...curr.messages, userMessage, assistantMessage],
+      compactStates: withoutCompactError(curr.compactStates, session.id),
       lastScrolledUserMessageId: userMessage.id,
       messageJump: null,
       highlightedMessageId: null,
@@ -918,13 +930,25 @@ export const useAppStore = create<AppState>((set, get) => ({
         Object.entries(curr.bringBacks).map(([id, items]) => [id, items.filter((b) => !threadIds.has(b.threadId))])
       ),
       activeThreadId: curr.activeThreadId && threadIds.has(curr.activeThreadId) ? null : curr.activeThreadId,
+      compactStates: withoutCompactError(curr.compactStates, touched.id),
       ...(text !== null && session.kind === 'main' && { lastScrolledUserMessageId: userMessage.id })
     }))
     return true
   },
 
-  stopStreaming: (sessionId) => stopRepliesIn(new Set([sessionId]))
+  stopStreaming: (sessionId) => stopRepliesIn(new Set([sessionId])),
+
+  compactSession: (sessionId) => window.api.invoke('compact:run', sessionId),
+
+  openContextCard: (sessionId) => set({ contextCardFor: sessionId })
 }))
+
+// A failed compaction stops being news once the conversation moves on; a running one stays.
+function withoutCompactError(states: Record<string, CompactState>, sessionId: string): Record<string, CompactState> {
+  if (states[sessionId]?.status !== 'error') return states
+  const { [sessionId]: _dropped, ...rest } = states
+  return rest
+}
 
 function regenerateWarning(marks: Mark[], threads: Session[]): string {
   const counts = [marks.length > 0 && `${marks.length} 条 mark`, threads.length > 0 && `${threads.length} 个追问`]
@@ -1159,6 +1183,15 @@ window.api.on('session:updated', (session) => {
   )
 })
 
+window.api.on('compact:state', ({ sessionId, state }) =>
+  useAppStore.setState((curr) => {
+    if (state) return { compactStates: { ...curr.compactStates, [sessionId]: state } }
+    if (!(sessionId in curr.compactStates)) return curr
+    const { [sessionId]: _dropped, ...rest } = curr.compactStates
+    return { compactStates: rest }
+  })
+)
+
 window.api.on('session:open', (sessionId) => useAppStore.getState().selectSession(sessionId))
 
 window.api.on('chat:event', ({ messageId, event }) => {
@@ -1201,7 +1234,12 @@ window.api.on('chat:event', ({ messageId, event }) => {
       patch((m) => ({ web: { steps: m.web?.steps ?? [], sources: [...(m.web?.sources ?? []), ...event.sources] } }))
       break
     case 'done':
-      finish({ status: 'done', inputTokens: event.usage.input, outputTokens: event.usage.output })
+      finish({
+        status: 'done',
+        inputTokens: event.usage.input,
+        outputTokens: event.usage.output,
+        contextTokens: event.usage.context
+      })
       break
     case 'error':
       finish({ status: 'error', error: event.message, errorKind: event.kind })

@@ -35,7 +35,7 @@ function message(id: string): Message {
   return {
     id, sessionId: 'a', seq: 1, role: 'assistant', content: id,
     thinking: null, thinkingMs: null, attachments: [], status: 'done', error: null, errorKind: null,
-    providerId: null, modelId: null, inputTokens: null, outputTokens: null, web: null, createdAt: 0
+    providerId: null, modelId: null, inputTokens: null, outputTokens: null, contextTokens: null, web: null, createdAt: 0
   }
 }
 
@@ -123,7 +123,7 @@ describe('conversation memory', () => {
       const session: MainSession = {
         id: 'a', kind: 'main', projectId: null, parentSessionId: null, anchorMessageId: null,
         anchorQuote: null, anchorStart: null, anchorEnd: null, anchorPrefix: null, anchorSuffix: null,
-        contextMode: null, title: 'A', providerId: null, modelId: null, createdAt: 0, updatedAt: 0
+        contextMode: null, title: 'A', providerId: null, modelId: null, createdAt: 0, updatedAt: 0, compactSummary: null, compactThroughId: null, compactedAt: null
       }
       let finish!: (messages: Message[]) => void
       invoke.mockImplementation((channel: string) => channel === 'messages:list'

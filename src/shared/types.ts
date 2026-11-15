@@ -58,7 +58,7 @@ export type MainSession = {
   modelId: string | null
   createdAt: number
   updatedAt: number
-}
+} & CompactionFields
 
 export type ThreadSession = {
   id: string
@@ -77,9 +77,40 @@ export type ThreadSession = {
   modelId: string | null
   createdAt: number
   updatedAt: number
+} & CompactionFields
+
+// The latest compaction: what the model gets in place of the messages up to and including compactThroughId.
+// All three are set together, or all null.
+export type CompactionFields = {
+  compactSummary: string | null
+  compactThroughId: string | null
+  compactedAt: number | null
 }
 
 export type Session = MainSession | ThreadSession
+
+export type NothingReason = 'recent' | 'files_only' | 'too_large' | 'model_deleted'
+
+// How full a session's context is. tokens and window are for the model picked in the input box (window null: its
+// window is unknown); compressible and nothingReason are for the session's own model, which compacting uses.
+// compressible: what compacting now could free (the text before the newest rounds; attachments stay).
+// nothingReason: why nothing can be compacted; null exactly when compressible > 0.
+// summary: the one the model is given now (a fork thread's may be its main session's), null when none.
+export type ContextUsage = {
+  tokens: number
+  window: number | null
+  compressible: number
+  summary: string | null
+  nothingReason: NothingReason | null
+}
+
+// error 'nothing': nothing could be compacted (ContextUsage.nothingReason says why). ok with an error: an earlier
+// pass saved a summary and a follow-up pass failed.
+// 'deleted': the session went away meanwhile.
+export type CompactResult =
+  | { ok: true; session: Session; error?: string }
+  | { ok: false; error: string }
+export type CompactState = { status: 'running' } | { status: 'error'; error: string }
 
 export type Attachment =
   | { type: 'file'; fileId: string }
@@ -121,6 +152,8 @@ export type Message = {
   modelId: string | null
   inputTokens: number | null
   outputTokens: number | null
+  // Input tokens of the reply's first request, i.e. the context it was given; inputTokens sums every tool round.
+  contextTokens: number | null
   // Only on a reply that went online; null otherwise.
   web: WebActivity | null
   createdAt: number
@@ -316,7 +349,8 @@ export type StreamEvent =
   // A web tool started; its sources follow once it returns.
   | { type: 'step'; step: WebStep }
   | { type: 'sources'; sources: WebSource[] }
-  | { type: 'done'; usage: { input: number; output: number }; stopReason: string }
+  // usage.input and output are summed over tool rounds (each is billed); context is the first round's input.
+  | { type: 'done'; usage: { input: number; output: number; context: number }; stopReason: string }
   | {
       type: 'error'
       kind: ErrorKind
@@ -470,6 +504,9 @@ export type IpcChannels = {
   // Only the last reply of a session; returns at once, like chat:send.
   'chat:regenerate': (input: ChatRegenerateInput) => Promise<ChatRegenerateResult>
   'chat:stop': (messageId: string) => void
+  // Resolves when the compaction ends; progress also goes to every window as `compact:state`.
+  'compact:run': (sessionId: string) => Promise<CompactResult>
+  'compact:usage': (sessionId: string, modelId: string) => ContextUsage
   // Returns at once; the text then streams in as `organize:event`s.
   'organize:start': (input: OrganizeInput) => OrganizeStarted
   'organize:stop': (jobId: string) => void
@@ -525,6 +562,7 @@ export type IpcChannels = {
 export type IpcEvents = {
   'chat:event': { messageId: string; event: StreamEvent }
   'organize:event': { jobId: string; event: StreamEvent }
+  'compact:state': { sessionId: string; state: CompactState | null }
   // A session changed in the main process on its own, e.g. it got its automatic title.
   'session:updated': Session
   // The window is about to close: save what's pending, then answer with `app:flushed`.

@@ -163,7 +163,7 @@ describe('session actions', () => {
         error: null,
         errorKind: null,
         inputTokens: tokens?.[0] ?? null,
-        outputTokens: tokens?.[1] ?? null,
+        outputTokens: tokens?.[1] ?? null, contextTokens: null,
         web: null
       })
       return m
