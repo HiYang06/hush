@@ -122,7 +122,7 @@ describe('conversation memory', () => {
     try {
       const session: MainSession = {
         id: 'a', kind: 'main', projectId: null, parentSessionId: null, anchorMessageId: null,
-        anchorQuote: null, anchorStart: null, anchorEnd: null, anchorPrefix: null, anchorSuffix: null,
+        anchorQuote: null, anchorMarkdown: null, anchorStart: null, anchorEnd: null, anchorPrefix: null, anchorSuffix: null,
         contextMode: null, title: 'A', providerId: null, modelId: null, createdAt: 0, updatedAt: 0, compactSummary: null, compactThroughId: null, compactedAt: null
       }
       let finish!: (messages: Message[]) => void

@@ -2590,6 +2590,18 @@ select {
   margin-bottom: 8px;
 }
 
+.thread-anchor-quote .markdown-body,
+.thread-list-quote .markdown-body,
+.mark-quote-text .markdown-body {
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  color: inherit;
+  text-shadow: none;
+  --paragraph-gap: 0.4em;
+}
+
 .thread-anchor-banner .thread-anchor-quote {
   flex: 1;
   min-height: 0;

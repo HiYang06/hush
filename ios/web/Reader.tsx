@@ -13,6 +13,7 @@ import { post } from './bridge'
 // What Swift hands over for one session (HushCore Library.conversationJSON).
 type Conversation = {
   anchorQuote: string | null
+  anchorMarkdown: string | null
   messages: Message[]
   marks: Mark[]
   threads: ThreadSession[]
@@ -153,11 +154,16 @@ export const Reader: React.FC = () => {
     )
   }
   if (!conversation) return null
-  const { messages, marks, threads, categories, anchorQuote, files } = conversation
+  const { messages, marks, threads, categories, anchorQuote, anchorMarkdown, files } = conversation
+  const anchorText = anchorMarkdown ?? anchorQuote
 
   return (
     <div className="reader chat-column-inner">
-      {anchorQuote !== null && <div className="thread-anchor-quote">「{anchorQuote}」</div>}
+      {anchorText !== null && (
+        <div className="thread-anchor-quote">
+          <MarkdownContent content={anchorText} />
+        </div>
+      )}
       {messages.length === 0 && <div className="reader-empty">这个会话还没有消息</div>}
       {messages.map((message) => (
         <ReaderMessage

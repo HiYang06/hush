@@ -12,6 +12,7 @@ import {
   ThreadBranchIcon
 } from '@renderer/components/common/Icons'
 import { CompactDivider } from '@renderer/components/chat/ContextMeter'
+import { MarkdownContent } from '@renderer/components/chat/MarkdownContent'
 import { MessageItem } from '@renderer/components/chat/MessageItem'
 import { ChatInputBox } from '@renderer/components/chat/ChatInputBox'
 const NoteView = React.lazy(() => import('@renderer/components/note-editor/NoteView').then((m) => ({ default: m.NoteView })))
@@ -144,7 +145,17 @@ const ThreadTab: React.FC = () => {
         </div>
 
         <div className="thread-anchor-banner">
-          <div className="thread-anchor-quote">「{currentThread?.anchorQuote ?? draft?.anchorQuote}」</div>
+          <div className="thread-anchor-quote">
+            <MarkdownContent
+              content={
+                currentThread?.anchorMarkdown ??
+                currentThread?.anchorQuote ??
+                draft?.anchorMarkdown ??
+                draft?.anchorQuote ??
+                ''
+              }
+            />
+          </div>
           {currentThread ? (
             <ThreadModeSwitch mode={currentThread.contextMode} />
           ) : (
@@ -208,7 +219,9 @@ const ThreadTab: React.FC = () => {
               <span>{t.contextMode === 'fork' ? 'Fork' : 'New'}</span>
               <span>{messageCounts.get(t.id) ?? 0} 条消息</span>
             </div>
-            <div className="thread-list-quote">「{t.anchorQuote}」</div>
+            <div className="thread-list-quote">
+              <MarkdownContent content={t.anchorMarkdown ?? t.anchorQuote} />
+            </div>
           </button>
         ))}
       </div>
@@ -344,7 +357,9 @@ const MarkTab: React.FC = () => {
                 </div>
               </div>
 
-              <div className="mark-quote-text">{mark.quote}</div>
+              <div className="mark-quote-text">
+                <MarkdownContent content={mark.quoteMarkdown ?? mark.quote} />
+              </div>
 
               {mark.comment && (
                 <div className="mark-comment-text">{mark.comment}</div>

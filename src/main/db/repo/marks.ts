@@ -5,8 +5,8 @@ import { getMessage } from './messages'
 import { getSession } from './sessions'
 
 const MARK_COLUMNS = `id, session_id AS sessionId, message_id AS messageId, quote,
-  start_offset AS startOffset, end_offset AS endOffset, prefix, suffix, comment,
-  category_id AS categoryId, created_at AS createdAt`
+  quote_markdown AS quoteMarkdown, start_offset AS startOffset, end_offset AS endOffset, prefix, suffix,
+  comment, category_id AS categoryId, created_at AS createdAt`
 
 // Includes the marks made in its threads: session_id always names the main session.
 export function listMarks(db: Database.Database, mainSessionId: string): Mark[] {
@@ -29,12 +29,13 @@ export function createMark(db: Database.Database, input: MarkInput): Mark {
     const session = getSession(db, getMessage(db, input.messageId).sessionId)
     const id = randomUUID()
     db.prepare(
-      `INSERT INTO marks (id, session_id, message_id, quote, start_offset, end_offset, prefix, suffix,
-         comment, category_id, created_at)
-       VALUES (@id, @sessionId, @messageId, @quote, @startOffset, @endOffset, @prefix, @suffix,
-         @comment, @categoryId, @createdAt)`
+      `INSERT INTO marks (id, session_id, message_id, quote, quote_markdown, start_offset, end_offset, prefix,
+         suffix, comment, category_id, created_at)
+       VALUES (@id, @sessionId, @messageId, @quote, @quoteMarkdown, @startOffset, @endOffset, @prefix,
+         @suffix, @comment, @categoryId, @createdAt)`
     ).run({
       ...input,
+      quoteMarkdown: input.quoteMarkdown ?? null,
       id,
       sessionId: session.kind === 'thread' ? session.parentSessionId : session.id,
       createdAt: Date.now()

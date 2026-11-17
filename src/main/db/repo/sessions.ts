@@ -5,11 +5,11 @@ import type { ProjectSessionRef } from '../../llm/types'
 import { mergeSessionNote } from './notes'
 
 const SESSION_COLUMNS = `id, kind, project_id AS projectId, parent_session_id AS parentSessionId,
-  anchor_message_id AS anchorMessageId, anchor_quote AS anchorQuote, anchor_start AS anchorStart,
-  anchor_end AS anchorEnd, anchor_prefix AS anchorPrefix, anchor_suffix AS anchorSuffix,
-  context_mode AS contextMode, title, provider_id AS providerId, model_id AS modelId,
-  created_at AS createdAt, updated_at AS updatedAt, compact_summary AS compactSummary,
-  compact_through_id AS compactThroughId, compacted_at AS compactedAt`
+  anchor_message_id AS anchorMessageId, anchor_quote AS anchorQuote, anchor_markdown AS anchorMarkdown,
+  anchor_start AS anchorStart, anchor_end AS anchorEnd, anchor_prefix AS anchorPrefix,
+  anchor_suffix AS anchorSuffix, context_mode AS contextMode, title, provider_id AS providerId,
+  model_id AS modelId, created_at AS createdAt, updated_at AS updatedAt,
+  compact_summary AS compactSummary, compact_through_id AS compactThroughId, compacted_at AS compactedAt`
 
 export function listSessions(db: Database.Database): Session[] {
   return db
@@ -57,11 +57,13 @@ export function createThreadSession(
   const id = randomUUID()
   const now = Date.now()
   db.prepare(
-    `INSERT INTO sessions (id, kind, parent_session_id, anchor_message_id, anchor_quote, anchor_start,
-       anchor_end, anchor_prefix, anchor_suffix, context_mode, title, provider_id, model_id, created_at, updated_at)
-     VALUES (@id, 'thread', @parentSessionId, @anchorMessageId, @anchorQuote, @anchorStart, @anchorEnd,
-       @anchorPrefix, @anchorSuffix, @contextMode, @title, @providerId, @modelId, @now, @now)`
-  ).run({ ...input, id, now })
+    `INSERT INTO sessions (id, kind, parent_session_id, anchor_message_id, anchor_quote, anchor_markdown,
+       anchor_start, anchor_end, anchor_prefix, anchor_suffix, context_mode, title, provider_id, model_id,
+       created_at, updated_at)
+     VALUES (@id, 'thread', @parentSessionId, @anchorMessageId, @anchorQuote, @anchorMarkdown,
+       @anchorStart, @anchorEnd, @anchorPrefix, @anchorSuffix, @contextMode, @title, @providerId, @modelId,
+       @now, @now)`
+  ).run({ ...input, anchorMarkdown: input.anchorMarkdown ?? null, id, now })
   return getSession(db, id)
 }
 

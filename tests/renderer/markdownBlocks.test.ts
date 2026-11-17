@@ -94,11 +94,31 @@ describe('normalizeMathDelimiters', () => {
   it('leaves code, existing math and LaTeX line breaks alone', () => {
     const untouched = [
       '`\\(x\\)`',
-      '```latex\n\\[ x \\]\n```',
+      '`$\\$$`',
+      '```latex\n\\[ x \\]\n$\\$$```',
       '$$\na \\\\[2pt] b\n$$',
       '路径 C:\\\\(x\\\\)',
+      '价格 \\$5 和 \\$10',
       '没有公式'
     ]
     for (const s of untouched) expect(n(s), s).toBe(s)
+  })
+
+  it('escapes \\$ inside math spans so remark-math does not break subsequent formulas', () => {
+    const cases = [
+      '先加 $\\$$，再把 $A \\to \\alpha$ 填入 $M[A, b]$。',
+      '先置 $\\$ \\in \\text{FOLLOW}(S)$。',
+      '但一定会有 $\\$$！',
+      '$$\\text{end} = \\$$$',
+      '\\(\\$\\) 与 \\(x\\)'
+    ]
+    for (const c of cases) {
+      const html = render(n(c))
+      const visible = html.replace(/<annotation[^>]*>[\s\S]*?<\/annotation>/g, '')
+      expect(html, c).toContain('class="katex"')
+      expect(html, c).not.toContain('katex-error')
+      expect(visible, c).not.toContain('\\text{')
+      expect(visible, c).not.toContain('\\to')
+    }
   })
 })

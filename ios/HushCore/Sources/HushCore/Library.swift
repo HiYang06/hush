@@ -44,6 +44,7 @@ extension Library {
                 WITH own AS (SELECT * FROM messages WHERE session_id = :id ORDER BY seq)
                 SELECT json_object(
                   'anchorQuote', (SELECT anchor_quote FROM sessions WHERE id = :id),
+                  'anchorMarkdown', (SELECT anchor_markdown FROM sessions WHERE id = :id),
                   'messages', (SELECT json_group_array(json_object(
                     'id', id, 'sessionId', session_id, 'seq', seq, 'role', role, 'content', content,
                     'thinking', thinking, 'thinkingMs', thinking_ms, 'attachments', json(attachments),
@@ -52,12 +53,14 @@ extension Library {
                     'web', json(web), 'createdAt', created_at)) FROM own),
                   'marks', (SELECT json_group_array(json_object(
                     'id', id, 'sessionId', session_id, 'messageId', message_id, 'quote', quote,
-                    'startOffset', start_offset, 'endOffset', end_offset, 'prefix', prefix, 'suffix', suffix,
-                    'comment', comment, 'categoryId', category_id, 'createdAt', created_at))
+                    'quoteMarkdown', quote_markdown, 'startOffset', start_offset, 'endOffset', end_offset,
+                    'prefix', prefix, 'suffix', suffix, 'comment', comment, 'categoryId', category_id,
+                    'createdAt', created_at))
                     FROM marks WHERE message_id IN (SELECT id FROM own)),
                   'threads', (SELECT json_group_array(json_object(
                     'id', id, 'kind', kind, 'projectId', project_id, 'parentSessionId', parent_session_id,
-                    'anchorMessageId', anchor_message_id, 'anchorQuote', anchor_quote, 'anchorStart', anchor_start,
+                    'anchorMessageId', anchor_message_id, 'anchorQuote', anchor_quote,
+                    'anchorMarkdown', anchor_markdown, 'anchorStart', anchor_start,
                     'anchorEnd', anchor_end, 'anchorPrefix', anchor_prefix, 'anchorSuffix', anchor_suffix,
                     'contextMode', context_mode, 'title', title, 'providerId', provider_id, 'modelId', model_id,
                     'createdAt', created_at, 'updatedAt', updated_at))

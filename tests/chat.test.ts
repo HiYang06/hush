@@ -61,6 +61,7 @@ const MAIN: Session = {
   parentSessionId: null,
   anchorMessageId: null,
   anchorQuote: null,
+  anchorMarkdown: null,
   anchorStart: null,
   anchorEnd: null,
   anchorPrefix: null,

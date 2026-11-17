@@ -31,7 +31,7 @@ function searchMessages(db: ReturnType<typeof openDb>, query: string): string[] 
 describe('openDb', () => {
   it('applies all migrations and seeds mark categories', () => {
     const db = openDb(':memory:')
-    expect(db.pragma('user_version', { simple: true })).toBe(12)
+    expect(db.pragma('user_version', { simple: true })).toBe(13)
     expect(db.pragma('foreign_keys', { simple: true })).toBe(1)
     expect(listMarkCategories(db)).toEqual([
       { id: 'cat-knowledge', name: '知识点', color: 'amber', sortOrder: 1 },
@@ -64,7 +64,7 @@ describe('openDb', () => {
     old.close()
 
     const db = openDb(file)
-    expect(db.pragma('user_version', { simple: true })).toBe(12)
+    expect(db.pragma('user_version', { simple: true })).toBe(13)
     const found = search(db, '特征值')
     expect(found.messages.map((m) => m.snippet)).toEqual(['矩阵的特征值分解'])
     expect(found.notes.map((n) => n.snippet)).toEqual(['特征值'])

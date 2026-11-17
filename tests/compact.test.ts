@@ -26,7 +26,7 @@ const MODEL = {
 
 const SESSION: Session = {
   id: 's', kind: 'main', projectId: null, parentSessionId: null, anchorMessageId: null, anchorQuote: null,
-  anchorStart: null, anchorEnd: null, anchorPrefix: null, anchorSuffix: null, contextMode: null, title: '',
+  anchorMarkdown: null, anchorStart: null, anchorEnd: null, anchorPrefix: null, anchorSuffix: null, contextMode: null, title: '',
   providerId: null, modelId: null, createdAt: 0, updatedAt: 0,
   compactSummary: null, compactThroughId: null, compactedAt: null
 }

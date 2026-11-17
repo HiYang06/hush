@@ -48,6 +48,7 @@ export type MainSession = {
   parentSessionId: null
   anchorMessageId: null
   anchorQuote: null
+  anchorMarkdown: null
   anchorStart: null
   anchorEnd: null
   anchorPrefix: null
@@ -67,6 +68,7 @@ export type ThreadSession = {
   parentSessionId: string
   anchorMessageId: string
   anchorQuote: string
+  anchorMarkdown: string | null
   anchorStart: number
   anchorEnd: number
   anchorPrefix: string
@@ -183,6 +185,7 @@ export type Mark = {
   sessionId: string
   messageId: string
   quote: string
+  quoteMarkdown: string | null
   startOffset: number
   endOffset: number
   prefix: string
@@ -195,7 +198,7 @@ export type Mark = {
 export type MarkInput = Pick<
   Mark,
   'messageId' | 'quote' | 'startOffset' | 'endOffset' | 'prefix' | 'suffix' | 'comment' | 'categoryId'
->
+> & { quoteMarkdown?: string | null }
 
 export type MarkPatch = Pick<Mark, 'comment' | 'categoryId'>
 
@@ -370,7 +373,7 @@ export type ThreadAnchor = Pick<
   | 'anchorPrefix'
   | 'anchorSuffix'
   | 'contextMode'
->
+> & { anchorMarkdown?: string | null }
 
 export type ChatSendInput = {
   // null starts a new session: a thread when newThread is set, otherwise a main session.

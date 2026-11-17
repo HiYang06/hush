@@ -8,9 +8,9 @@ type ToolbarState = {
   rect: DOMRect
   copyText: string
   // Set when the selection is inside one reply's text and that reply can carry a thread.
-  thread: { messageId: string; anchor: Anchor } | null
+  thread: { messageId: string; anchor: Anchor; markdown: string } | null
   // Set when the selection is inside one finished reply's text, in the main conversation or a thread.
-  mark: { messageId: string; anchor: Anchor } | null
+  mark: { messageId: string; anchor: Anchor; markdown: string } | null
   // Set when the selection is inside one finished reply's text in a thread.
   bringBack: { messageId: string; markdown: string } | null
   // Set when the selection is inside one reply's text, in the main conversation or a thread.
@@ -66,9 +66,9 @@ function readSelection(): ToolbarState | null {
   return {
     rect: range.getBoundingClientRect(),
     copyText: anchor.quote,
-    thread: threadable ? { messageId, anchor } : null,
+    thread: threadable ? { messageId, anchor, markdown } : null,
     // Marks aren't drawn on a reply still being written, so one made there wouldn't show.
-    mark: status === 'streaming' ? null : { messageId, anchor },
+    mark: status === 'streaming' ? null : { messageId, anchor, markdown },
     bringBack:
       startMessage.dataset.inThread !== undefined && status !== 'streaming' ? { messageId, markdown } : null,
     clip: { source: { messageId, start: anchor.start, end: anchor.end }, markdown }
@@ -151,7 +151,7 @@ export const SelectionToolbar: React.FC = () => {
           type="button"
           className="selection-toolbar-btn"
           onClick={() => {
-            const { messageId, anchor } = state.mark!
+            const { messageId, anchor, markdown } = state.mark!
             const place = { x: rect.left + rect.width / 2, top: rect.top, bottom: rect.bottom }
             close()
             openMarkCard(
@@ -162,6 +162,7 @@ export const SelectionToolbar: React.FC = () => {
                     draft: {
                       messageId,
                       quote: anchor.quote,
+                      quoteMarkdown: markdown,
                       startOffset: anchor.start,
                       endOffset: anchor.end,
                       prefix: anchor.prefix,
@@ -192,11 +193,12 @@ export const SelectionToolbar: React.FC = () => {
           type="button"
           className="selection-toolbar-btn"
           onClick={() => {
-            const { messageId, anchor } = state.thread!
+            const { messageId, anchor, markdown } = state.thread!
             startDraftThread({
               parentSessionId: activeSessionId,
               anchorMessageId: messageId,
               anchorQuote: anchor.quote,
+              anchorMarkdown: markdown,
               anchorStart: anchor.start,
               anchorEnd: anchor.end,
               anchorPrefix: anchor.prefix,
