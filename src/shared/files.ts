@@ -6,6 +6,8 @@ export type FileKind = 'image' | 'pdf' | 'docx' | 'pptx' | 'text'
 
 export const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 export const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+// A PowerPoint 97–2003 file is converted to .pptx when attached (D-090), so no stored file has this mime.
+export const PPT_MIME = 'application/vnd.ms-powerpoint'
 
 // Limits from D-038.
 export const MAX_IMAGES_PER_MESSAGE = 20
@@ -48,6 +50,7 @@ export function detectMime(name: string, reportedMime: string): string | null {
   if (ext === 'pdf') return 'application/pdf'
   if (ext === 'docx') return DOCX_MIME
   if (ext === 'pptx') return PPTX_MIME
+  if (ext === 'ppt') return PPT_MIME
   if (TEXT_EXTENSIONS.has(ext) || reportedMime.startsWith('text/')) return 'text/plain'
   return null
 }

@@ -1,4 +1,4 @@
-import { detectMime, fileKind } from '@shared/files'
+import { detectMime, fileKind, PPT_MIME, PPTX_MIME } from '@shared/files'
 import type { DocumentPage, ExtractedPart, FileRecord } from '@shared/types'
 import { downscale, type Encoded } from './images'
 
@@ -29,21 +29,30 @@ async function addImage(name: string, image: Encoded): Promise<{ type: 'image'; 
 
 // Extracts everything a model might need now (D-018); context.ts later picks what to send.
 export async function prepareFile(file: File): Promise<FileRecord> {
-  const mime = detectMime(file.name, file.type)
+  let mime = detectMime(file.name, file.type)
   if (!mime) throw new UnsupportedFileError(file.name)
-  const data = new Uint8Array(await file.arrayBuffer())
+  let name = file.name
+  let data = new Uint8Array(await file.arrayBuffer())
+  // Kept as the .pptx it's converted to, under that name: the preview, page images and opening the file
+  // in another app all work from the stored bytes.
+  if (mime === PPT_MIME) {
+    const { pptToPptx } = await import('./pptToPptx')
+    data = new Uint8Array(await pptToPptx(data))
+    mime = PPTX_MIME
+    name = `${baseName(file.name)}.pptx`
+  }
   let extracted: ExtractedPart[] | null = null
   let isScanned: boolean | null = null
 
   switch (fileKind(mime)) {
     case 'image': {
       const resized = await downscale(data, mime)
-      if (resized) extracted = [await addImage(file.name, resized)]
+      if (resized) extracted = [await addImage(name, resized)]
       break
     }
     case 'pdf': {
       const { readPdf } = await import('./media')
-      const pdf = await readPdf(data, async (n, image) => (await addImage(`${baseName(file.name)}-${n}`, image)).fileId)
+      const pdf = await readPdf(data, async (n, image) => (await addImage(`${baseName(name)}-${n}`, image)).fileId)
       isScanned = pdf.isScanned
       extracted = [
         ...(pdf.outline.length > 0 ? [{ type: 'outline' as const, entries: pdf.outline }] : []),
@@ -70,7 +79,7 @@ export async function prepareFile(file: File): Promise<FileRecord> {
           ...(!drawn || !drawn.complete ? slide.images : [])
         ]
         const imageIds: string[] = []
-        for (const img of images) imageIds.push((await addImage(`${baseName(file.name)}-${img.name}`, img)).fileId)
+        for (const img of images) imageIds.push((await addImage(`${baseName(name)}-${img.name}`, img)).fileId)
         const page: DocumentPage = { n, title: slide.title, text: slide.text, tags: slide.tags, imageIds }
         extracted.push({ type: 'page', ...page })
       }
@@ -80,7 +89,7 @@ export async function prepareFile(file: File): Promise<FileRecord> {
       const { extractDocx } = await import('./office')
       extracted = []
       for (const p of await extractDocx(data.buffer)) {
-        extracted.push(p.type === 'text' ? p : await addImage(`${baseName(file.name)}-${p.name}`, p))
+        extracted.push(p.type === 'text' ? p : await addImage(`${baseName(name)}-${p.name}`, p))
       }
       break
     }
@@ -89,5 +98,5 @@ export async function prepareFile(file: File): Promise<FileRecord> {
       break
   }
 
-  return window.api.invoke('files:add', { name: file.name, mime, data, extracted, isScanned })
+  return window.api.invoke('files:add', { name, mime, data, extracted, isScanned })
 }
