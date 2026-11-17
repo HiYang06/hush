@@ -220,7 +220,7 @@ const ThreadTab: React.FC = () => {
               <span>{messageCounts.get(t.id) ?? 0} 条消息</span>
             </div>
             <div className="thread-list-quote">
-              <MarkdownContent content={t.anchorMarkdown ?? t.anchorQuote} />
+              <MarkdownContent content={t.anchorMarkdown ?? t.anchorQuote} preview />
             </div>
           </button>
         ))}

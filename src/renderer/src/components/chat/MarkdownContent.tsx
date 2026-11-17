@@ -25,6 +25,8 @@ interface MarkdownContentProps {
   // A reply that went online: its [n] markers render as badges pointing at these.
   sources?: WebSource[]
   streaming?: boolean
+  // Rendered inside a clickable card: links and code blocks would put interactive elements inside its <button>.
+  preview?: boolean
   marks?: Mark[]
   categories?: MarkCategory[]
   threads?: ThreadSession[]
@@ -40,6 +42,7 @@ const MarkdownContentView: React.FC<MarkdownContentProps> = ({
   messageId,
   sources,
   streaming = false,
+  preview = false,
   marks = [],
   categories = [],
   threads = [],
@@ -68,6 +71,7 @@ const MarkdownContentView: React.FC<MarkdownContentProps> = ({
         </div>
       ),
       a: ({ href, children }) => {
+        if (preview) return <span>{children}</span>
         if (href?.startsWith('hush://message/')) {
           const msgId = hushLinkMessageId(href)
           return (
@@ -95,7 +99,7 @@ const MarkdownContentView: React.FC<MarkdownContentProps> = ({
         const rawText = String(children).replace(/\n$/, '')
         const isBlock = Boolean(match) || String(children).includes('\n')
 
-        if (isBlock) {
+        if (isBlock && !preview) {
           return (
             <ShikiCodeBlock
               language={match?.[1] ?? 'text'}
@@ -119,7 +123,7 @@ const MarkdownContentView: React.FC<MarkdownContentProps> = ({
         return <Citation source={source} />
       }
     }),
-    [streaming, sources, onJumpToMessage]
+    [streaming, preview, sources, onJumpToMessage]
   )
   const decorated = Boolean(messageId) && !streaming && (marks.length > 0 || threads.length > 0 || clips.length > 0)
 

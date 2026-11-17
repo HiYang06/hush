@@ -96,6 +96,8 @@ describe('normalizeMathDelimiters', () => {
       '`\\(x\\)`',
       '`$\\$$`',
       '```latex\n\\[ x \\]\n$\\$$```',
+      '- 运行：\n\n      ```bash\n      echo $A "\\$B" $C\n      ```',
+      '    echo $A "\\$B" $C',
       '$$\na \\\\[2pt] b\n$$',
       '路径 C:\\\\(x\\\\)',
       '价格 \\$5 和 \\$10',
