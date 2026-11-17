@@ -2543,9 +2543,11 @@ select {
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 0;
 }
 
 .thread-sub-bar {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2570,6 +2572,10 @@ select {
 }
 
 .thread-anchor-banner {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100% / 3);
   padding: 10px 14px;
   background: var(--bg-elevated);
   border-bottom: 1px solid var(--border-subtle);
@@ -2584,7 +2590,19 @@ select {
   margin-bottom: 8px;
 }
 
+.thread-anchor-banner .thread-anchor-quote {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.thread-anchor-banner .thread-anchor-quote::-webkit-scrollbar {
+  width: 4px;
+}
+
 .thread-mode-row {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2619,6 +2637,7 @@ select {
 
 .thread-messages-scroll {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 14px;
   user-select: text;
@@ -2675,6 +2694,7 @@ select {
 }
 
 .thread-input-wrap {
+  flex-shrink: 0;
   padding: 10px 14px 14px;
   border-top: 1px solid var(--border-subtle);
 }
