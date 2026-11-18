@@ -1,6 +1,7 @@
 import { GFM, parser } from '@lezer/markdown'
 import { describe, expect, it } from 'vitest'
 import { mathSyntax } from '../../src/renderer/src/components/note-editor/mathSyntax'
+import { normalizeMathDelimiters } from '../../src/renderer/src/lib/markdownBlocks'
 
 const md = parser.configure([GFM, mathSyntax])
 
@@ -40,5 +41,13 @@ describe('mathSyntax', () => {
 
   it('leaves code alone', () => {
     expect(nodes('```\n$$\nx\n$$\n```', 'BlockMath')).toEqual([])
+  })
+
+  it('reads AI drafts the way replies render once their math is normalized', () => {
+    const draft = '$$\\begin{aligned}\nA &\\to \\beta A\' \\\\\n\\end{aligned}$$\n\n### 下一节\n\nFOLLOW(S) = {$}，遇 $ 接受，$x$ 成立'
+    const fixed = normalizeMathDelimiters(draft)
+    expect(nodes(fixed, 'BlockMath')).toEqual(['$$\n\\begin{aligned}\nA &\\to \\beta A\' \\\\\n\\end{aligned}\n$$'])
+    expect(nodes(fixed, 'ATXHeading3')).toEqual(['### 下一节'])
+    expect(nodes(fixed, 'InlineMath')).toEqual(['$x$'])
   })
 })

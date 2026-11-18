@@ -106,6 +106,35 @@ describe('normalizeMathDelimiters', () => {
     for (const s of untouched) expect(n(s), s).toBe(s)
   })
 
+  it('puts $$ fences that share a line with the formula on their own lines', () => {
+    const aligned = '**转换**：\n$$\\begin{aligned}\nA &\\to \\beta A\' \\\\\nA\' &\\to \\varepsilon\n\\end{aligned}$$\n\n### 下一节'
+    expect(n(aligned)).toBe('**转换**：\n$$\n\\begin{aligned}\nA &\\to \\beta A\' \\\\\nA\' &\\to \\varepsilon\n\\end{aligned}\n$$\n\n### 下一节')
+    const html = render(n(aligned))
+    expect(html).toContain('katex-display')
+    expect(html).not.toContain('katex-error')
+    expect(html).toContain('<h3>下一节</h3>')
+    expect(render(n('> 引用\n> $$\\begin{cases}\n> x \\\\\n> \\end{cases}$$\n\n正文'))).toMatch(/<blockquote>[\s\S]*katex-display[\s\S]*<\/blockquote>\n<p>正文/)
+    expect(n('1. 步骤\n\n   $$x\n   = 1$$')).toBe('1. 步骤\n\n   $$\n   x\n   = 1\n   $$')
+  })
+
+  it('opens the display block while a $$\\begin line is still streaming', () => {
+    expect(n('前文\n$$\\begin{aligned}\nA &\\to')).toBe('前文\n$$\n\\begin{aligned}\nA &\\to')
+  })
+
+  it('keeps a lone $ literal instead of pairing it across prose', () => {
+    const cases = ['FOLLOW(S) = {$}。\n由 S 得 FOLLOW(R) = {=, $}。', '遇 $ 接受，再看 $x$', '价格 $5 和 $10', '搜索符 [R, $]，后面是 `$`']
+    for (const c of cases) {
+      const html = render(n(c))
+      expect(html, c).not.toMatch(/class="katex"[\s\S]*[\u4e00-\u9fff]{2}[\s\S]*<\/annotation>/)
+    }
+    expect(n('遇 $ 接受，再看 $x$')).toBe('遇 \\$ 接受，再看 $x$')
+    expect(render(n('价格 $5 和 $10'))).toBe('<p>价格 $5 和 $10</p>')
+  })
+
+  it('leaves canonical math as written', () => {
+    for (const s of ['$x$ 与 $$y$$', '$$\nE = mc^2\n$$', '- 项\n\n  $$\n  a\n  $$', '> $$\n> a\n> $$']) expect(n(s), s).toBe(s)
+  })
+
   it('escapes \\$ inside math spans so remark-math does not break subsequent formulas', () => {
     const cases = [
       '先加 $\\$$，再把 $A \\to \\alpha$ 填入 $M[A, b]$。',

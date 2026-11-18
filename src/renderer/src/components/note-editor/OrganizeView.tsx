@@ -5,6 +5,7 @@ import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { unifiedMergeView } from '@codemirror/merge'
 import { lostClipLinks } from '@shared/noteClips'
 import type { NoteTarget, StreamEvent } from '@shared/types'
+import { normalizeMathDelimiters } from '@renderer/lib/markdownBlocks'
 import { flushNoteSave } from '@renderer/lib/noteSave'
 import { useAppStore } from '@renderer/stores/appStore'
 import { noteLook, revealNoteText, syncNoteContent } from './NoteEditor'
@@ -39,6 +40,14 @@ const compareLook = [
     }
   })
 ]
+
+// The note keeps what's written, so the model's math is put in the forms the note's parser reads right
+// (D-091) before the user sees the finished draft; otherwise `$$\begin{aligned}` swallows the rest of the note.
+function normalizeDraftMath(view: EditorView): void {
+  const raw = view.state.doc.toString()
+  const fixed = normalizeMathDelimiters(raw)
+  if (fixed !== raw) view.dispatch({ changes: { from: 0, to: raw.length, insert: fixed } })
+}
 
 interface OrganizeViewProps {
   target: NoteTarget
@@ -111,6 +120,7 @@ export const OrganizeView: React.FC<OrganizeViewProps> = ({ target, organize, on
     const finish = (): void => {
       jobRef.current = null
       setPhase('done')
+      normalizeDraftMath(view)
       if (rewrite) {
         const after = view.state.doc.toString()
         setLost(lostClipLinks(started, after))
@@ -190,6 +200,7 @@ export const OrganizeView: React.FC<OrganizeViewProps> = ({ target, organize, on
       return
     }
     setPhase('done')
+    normalizeDraftMath(view)
     view.dispatch({ effects: editable.current.reconfigure(EditorView.editable.of(true)) })
   }
 
